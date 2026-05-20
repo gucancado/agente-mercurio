@@ -35,8 +35,8 @@ if [[ -x "$WORKSPACE/_platform/mcp-bootstrap.sh" ]]; then
 fi
 
 # ─── 4. Gerar crontab a partir de cadencia.yml ─────────────────────────────
-CRONTAB=/etc/crontabs/agent
-mkdir -p "$(dirname "$CRONTAB")"
+# Em /home/agent porque o container roda como usuário não-root sem write em /etc.
+CRONTAB="${HOME_DIR}/agent-crontab"
 : > "$CRONTAB"
 
 # Para cada perfil habilitado, emite uma linha por entry de cron.

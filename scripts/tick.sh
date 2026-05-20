@@ -101,6 +101,30 @@ while IFS= read -r ITEM; do
     continue
   fi
 
+  # ── 4.0 Comandos mágicos (curto-circuita Claude) ──
+  LOWER_TEXT=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "$LOWER_TEXT" == "zerar-conversa" || "$LOWER_TEXT" == "zerar conversa" || "$LOWER_TEXT" == "/reset" ]]; then
+    log "  comando especial: zerar-conversa from=$IDENTIFIER"
+    curl -fsS --max-time 10 -X POST \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" '{channel:$ch, identifier:$id}')" \
+      "${WORKER_URL}/sdr/reset" >/dev/null 2>&1
+    EVO_NUMBER="${IDENTIFIER#+}"
+    EVO_PAYLOAD=$(jq -nc \
+      --arg number "$EVO_NUMBER" \
+      --arg text "Conversa zerada. Pode mandar *oi* que começo do zero 👍" \
+      '{number: $number, text: $text}')
+    curl -fsS --max-time 20 -X POST \
+      -H "apikey: ${EVOLUTION_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$EVO_PAYLOAD" \
+      "${EVOLUTION_API_URL}/message/sendText/${INSTANCE}" >/dev/null 2>&1
+    log "  reset feito + confirmação enviada"
+    PROCESSED=$((PROCESSED+1))
+    continue
+  fi
+
   PROJECT_BRIEF=$(cat "$PROJECT_DIR/PROJECT.md" 2>/dev/null || echo "(briefing ausente)")
   PLAYBOOK=$(cat "$PLAYBOOK_PATH" 2>/dev/null || echo "(playbook ausente)")
 

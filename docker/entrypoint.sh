@@ -103,13 +103,13 @@ if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
     ENABLED=$(yq -r ".profiles.\"$PROFILE\".enabled" "$WORKSPACE/scripts/cadencia.yml")
     log "  $PROFILE enabled=$ENABLED"
     if [[ "$ENABLED" == "false" ]]; then continue; fi
-    TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
+    # supercronic NÃO suporta `CRON_TZ=` inline (sintaxe vixie cron). Timezone
+    # vem da env var TZ do container (setada via Coolify env).
     CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml" 2>&1)
-    log "    TZ=$TZ"
     log "    crons raw: $(echo "$CRONS" | tr '\n' '|')"
     while IFS= read -r CRON_EXPR; do
       [[ -z "$CRON_EXPR" ]] && continue
-      echo "CRON_TZ=$TZ $CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" >> "$CRONTAB"
+      echo "$CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" >> "$CRONTAB"
       log "    + $CRON_EXPR"
     done <<< "$CRONS"
   done

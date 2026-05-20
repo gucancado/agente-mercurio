@@ -98,7 +98,9 @@ if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
   PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml" 2>&1)
   log "perfis em cadencia.yml: $(echo "$PROFILES" | tr '\n' ',')"
   for PROFILE in $PROFILES; do
-    ENABLED=$(yq -r ".profiles.$PROFILE.enabled // true" "$WORKSPACE/scripts/cadencia.yml")
+    # `// true` é armadilha — yq/jq tratam `false` como falsy e caem no default.
+    # Uso `if has("enabled") then .enabled else true end` pra default real.
+    ENABLED=$(yq -r "if .profiles.\"$PROFILE\".enabled == null then true else .profiles.\"$PROFILE\".enabled end" "$WORKSPACE/scripts/cadencia.yml")
     log "  $PROFILE enabled=$ENABLED"
     if [[ "$ENABLED" != "true" ]]; then continue; fi
     TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
@@ -135,12 +137,19 @@ if [[ ! -s "$CRONTAB" ]]; then
 fi
 
 log "starting supercronic..."
-supercronic "$CRONTAB" &
+SUPER_OUT=/tmp/supercronic.log
+( supercronic "$CRONTAB" > "$SUPER_OUT" 2>&1; echo $? > /tmp/supercronic.exit ) &
 SUPER_PID=$!
 log "supercronic pid=$SUPER_PID"
 
-# Espera supercronic. Se ele exitar, NÃO sai o container — sleep infinity pra debug.
-wait $SUPER_PID
-EXIT=$?
-log "supercronic exited with $EXIT — sleeping infinity for debug"
+# Espera supercronic. Se exitar, captura logs e sleep infinity pra debug.
+wait $SUPER_PID 2>/dev/null
+EXIT=$(cat /tmp/supercronic.exit 2>/dev/null || echo "?")
+log "supercronic terminou com exit=$EXIT — output:"
+if [[ -f "$SUPER_OUT" ]]; then
+  tail -30 "$SUPER_OUT" 2>&1 | while IFS= read -r l; do log "  super> $l"; done
+else
+  log "  (sem output capturado)"
+fi
+log "sleep infinity"
 sleep infinity

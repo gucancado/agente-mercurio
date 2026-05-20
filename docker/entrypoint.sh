@@ -93,66 +93,18 @@ if [[ -x "$WORKSPACE/_platform/mcp-bootstrap.sh" ]]; then
   "$WORKSPACE/_platform/mcp-bootstrap.sh" 2>&1 | while IFS= read -r l; do log_local "mcp> $l"; done
 fi
 
-# ── 4. Crontab
-CRONTAB="${HOME_DIR}/agent-crontab"
-: > "$CRONTAB"
-
-if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
-  PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml" 2>&1)
-  log "perfis em cadencia.yml: $(echo "$PROFILES" | tr '\n' ',')"
-  for PROFILE in $PROFILES; do
-    # yq retorna "true", "false" ou "null" se ausente.
-    # Política: só `false` literal pula; null/true/missing habilita.
-    ENABLED=$(yq -r ".profiles.\"$PROFILE\".enabled" "$WORKSPACE/scripts/cadencia.yml")
-    log "  $PROFILE enabled=$ENABLED"
-    if [[ "$ENABLED" == "false" ]]; then continue; fi
-    # supercronic NÃO suporta `CRON_TZ=` inline (sintaxe vixie cron). Timezone
-    # vem da env var TZ do container (setada via Coolify env).
-    CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml" 2>&1)
-    log "    crons raw: $(echo "$CRONS" | tr '\n' '|')"
-    while IFS= read -r CRON_EXPR; do
-      [[ -z "$CRON_EXPR" ]] && continue
-      echo "$CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" >> "$CRONTAB"
-      log "    + $CRON_EXPR"
-    done <<< "$CRONS"
-  done
-  CRONTAB_LINES=$(wc -l < "$CRONTAB" 2>&1)
-  log "crontab gerado: $CRONTAB_LINES linhas em $CRONTAB"
-  cat "$CRONTAB" 2>&1 | while IFS= read -r l; do log "  cron> $l"; done
-else
-  log "WARN: cadencia.yml ausente"
-fi
-
-# ── 5. Volumes
+# ── 4. Volumes runtime
 mkdir -p "$WORKSPACE/.logs" "$WORKSPACE/.cost" "$WORKSPACE/.locks" 2>&1
 log "diretórios runtime criados"
 
-# ── 6. Git identity
+# ── 5. Git identity
 git config --global user.name "agente-${AGENT_NAME:-mercurio}" 2>&1
 git config --global user.email "${AGENT_EMAIL:-agent@beeads.com.br}" 2>&1
 git config --global pull.rebase true 2>&1
 log "git config OK"
 
-# ── 7. Supercronic
-if [[ ! -s "$CRONTAB" ]]; then
-  log "WARN: crontab vazio — não há perfis habilitados; sleep infinity"
-  sleep infinity
-fi
-
-log "starting supercronic..."
-SUPER_OUT=/tmp/supercronic.log
-( supercronic "$CRONTAB" > "$SUPER_OUT" 2>&1; echo $? > /tmp/supercronic.exit ) &
-SUPER_PID=$!
-log "supercronic pid=$SUPER_PID"
-
-# Espera supercronic. Se exitar, captura logs e sleep infinity pra debug.
-wait $SUPER_PID 2>/dev/null
-EXIT=$(cat /tmp/supercronic.exit 2>/dev/null || echo "?")
-log "supercronic terminou com exit=$EXIT — output:"
-if [[ -f "$SUPER_OUT" ]]; then
-  tail -30 "$SUPER_OUT" 2>&1 | while IFS= read -r l; do log "  super> $l"; done
-else
-  log "  (sem output capturado)"
-fi
-log "sleep infinity"
-sleep infinity
+# ── 6. Trigger HTTP server (substitui supercronic — modelo trigger-based v0.7)
+# Worker faz POST /trigger quando webhook chega; aí roda tick.sh em background.
+# Container fica idle (sem custo Claude) até receber trigger.
+log "starting trigger-server na porta ${PORT:-3000}..."
+exec node /workspace/docker/trigger-server.js

@@ -1,25 +1,22 @@
 #!/bin/bash
-# tick.sh <profile>
-# Tick simplificado do mercurio (v0.6 — inbox-driven).
-# Sempre invoca Claude com a skill `processar-inbox`; sem cheap-tick.
-# Custo controlado por max-turns + cost cap diário em cadencia.yml.
+# tick.sh — v0.7 trigger-based
+# Lê inbox via REST do worker, invoca claude --print pra compor resposta (sem MCP),
+# envia via Evolution REST, marca lida via worker REST.
+# Disparado por trigger-server.js quando webhook chega.
 
 set -uo pipefail
-# NÃO usar set -e — `var=$(cmd)` com cmd falhando mata o script antes de
-# checarmos o exit code. Pegamos exits explicitamente.
 
-PROFILE="${1:?usage: tick.sh <profile>}"
+PROFILE="${1:-responsive}"
 WORKSPACE=/workspace
 TICK_ID="$(date -u +%Y%m%dT%H%M%SZ)-${PROFILE}-$$"
 LOCK_FILE="${WORKSPACE}/.locks/tick.${PROFILE}.lock"
 LOG_DIR="${WORKSPACE}/.logs"
 COST_DIR="${WORKSPACE}/.cost"
 COST_FILE="${COST_DIR}/$(date -u +%F).jsonl"
-CADENCIA="${WORKSPACE}/scripts/cadencia.yml"
 
 mkdir -p "$(dirname "$LOCK_FILE")" "$LOG_DIR" "$COST_DIR"
 
-# log local + POST /debug do worker pra owner ver via REST
+# log local + POST /debug worker
 log() {
   echo "[$(date -u +%FT%TZ)] [$TICK_ID] $*" >> "$LOG_DIR/tick.log"
   if [[ -n "${WORKER_URL:-}" && -n "${WORKER_TOKEN:-}" ]]; then
@@ -31,123 +28,184 @@ log() {
   fi
 }
 
-# ── 0. Lock por perfil ──────────────────────────────────────────────────
+# ── 0. Lock ─────────────────────────────────────────────────────────────
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  log "skip: tick anterior do perfil $PROFILE ainda rodando"
+  log "skip: tick anterior em execução"
   exit 0
 fi
 
 log "start"
 
-# ── 1. Guarda de custo (soft cap diário) ────────────────────────────────
-COST_CAP_DAY=$(yq -r '.guardrails.cost_cap_usd_per_day // 5.0' "$CADENCIA")
+# ── 1. Cost cap diário ──────────────────────────────────────────────────
+COST_CAP_DAY=$(yq -r '.guardrails.cost_cap_usd_per_day // 3.0' "$WORKSPACE/scripts/cadencia.yml")
 COST_TODAY=0
 if [[ -f "$COST_FILE" ]]; then
   COST_TODAY=$(jq -s '[.[].cost_usd] | add // 0' "$COST_FILE")
 fi
 OVER=$(awk -v c="$COST_TODAY" -v cap="$COST_CAP_DAY" 'BEGIN { print (c >= cap) ? 1 : 0 }')
 if [[ "$OVER" == "1" ]]; then
-  log "GUARDA INTERNA: cost cap diario (\$$COST_CAP_DAY) excedido (\$$COST_TODAY)"
+  log "GUARDA: cost cap diário (\$$COST_CAP_DAY) excedido (\$$COST_TODAY)"
   exit 0
 fi
 
-# ── 2. Git pull com retry ──────────────────────────────────────────────
-for i in 1 2 3; do
-  if git -C "$WORKSPACE" pull --rebase --autostash >/dev/null 2>>"$LOG_DIR/git.log"; then
+# ── 2. Lê inbox via REST do worker ──────────────────────────────────────
+: "${WORKER_URL:?WORKER_URL não definida}"
+: "${WORKER_TOKEN:?WORKER_TOKEN não definida}"
+
+INBOX_JSON=$(curl -fsS --max-time 10 \
+  -H "X-Agent-Token: ${WORKER_TOKEN}" \
+  "${WORKER_URL}/inbox-debug?unread_only=true&limit=10" 2>/dev/null)
+
+if [[ -z "$INBOX_JSON" ]]; then
+  log "erro buscando inbox"
+  exit 0
+fi
+
+COUNT=$(jq '.messages | length' <<<"$INBOX_JSON")
+log "inbox unread: $COUNT items"
+
+if [[ "$COUNT" == "0" ]]; then
+  log "inbox vazia; encerrando sem invocar claude"
+  exit 0
+fi
+
+# ── 3. Configs (model, persona, etc) ────────────────────────────────────
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
+CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 60' "$WORKSPACE/scripts/cadencia.yml")
+
+# ── 4. Loop FIFO (mais antigos primeiro) ────────────────────────────────
+# /inbox-debug retorna DESC por created_at, então invertemos pra processar do mais antigo
+ITEMS=$(jq -c '[.messages[]] | reverse | .[]' <<<"$INBOX_JSON")
+
+TOTAL_COST=0
+PROCESSED=0
+FAILED=0
+
+while IFS= read -r ITEM; do
+  ID=$(jq -r '.id' <<<"$ITEM")
+  INSTANCE=$(jq -r '.instance' <<<"$ITEM")
+  IDENTIFIER=$(jq -r '.identifier' <<<"$ITEM")
+  TEXT=$(jq -r '.message_text // "(sem texto)"' <<<"$ITEM")
+  PUSH_NAME=$(jq -r '.push_name // "?"' <<<"$ITEM")
+  PROJECT_SLUG=$(jq -r '.instance | split("-")[1:] | join("-")' <<<"$ITEM")
+
+  log "processando id=$ID from=$IDENTIFIER project=$PROJECT_SLUG: ${TEXT:0:60}"
+
+  PROJECT_DIR="$WORKSPACE/projetos/$PROJECT_SLUG"
+  if [[ ! -d "$PROJECT_DIR" ]]; then
+    log "  ERRO: $PROJECT_DIR não existe; pulando (não marca lido)"
+    FAILED=$((FAILED+1))
+    continue
+  fi
+
+  # Monta prompt enxuto pro Claude
+  PROJECT_BRIEF=$(cat "$PROJECT_DIR/PROJECT.md" 2>/dev/null || echo "(briefing ausente)")
+
+  PROMPT=$(cat <<EOF
+Você é a persona descrita abaixo (PROJECT.md). Responda a mensagem recebida no WhatsApp.
+
+== PROJECT.md ==
+$PROJECT_BRIEF
+== fim ==
+
+Mensagem recebida de **$IDENTIFIER** (nome WhatsApp: "$PUSH_NAME"):
+"$TEXT"
+
+Compose APENAS o texto da resposta WhatsApp, em PT-BR, curta (1-3 frases). Se é primeira mensagem em thread nova, inclua disclosure ("Sou [persona], agente automatizada da BeeAds, operada por humanos"). Sem aspas externas, sem prefixo "Resposta:". Apenas o texto.
+EOF
+)
+
+  # Invoca Claude SEM tools, só geração de texto
+  CLAUDE_STDOUT=$(mktemp)
+  CLAUDE_STDERR=$(mktemp)
+  (
+    cd "$WORKSPACE"
+    timeout "${CLAUDE_TIMEOUT}s" claude --print \
+      --model "$CLAUDE_MODEL" \
+      --max-turns 3 \
+      --output-format json \
+      --setting-sources project \
+      <<<"$PROMPT" \
+      > "$CLAUDE_STDOUT" 2> "$CLAUDE_STDERR"
+  )
+  CEXIT=$?
+
+  if [[ $CEXIT -ne 0 ]]; then
+    log "  claude exit=$CEXIT — não envia, não marca"
+    head -c 800 "$CLAUDE_STDERR" 2>/dev/null | tr '\n' ' ' | (read -r l; log "    err: ${l:0:500}")
+    rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
+    FAILED=$((FAILED+1))
+    continue
+  fi
+
+  # Parse: pega `result` (texto gerado) e custo
+  RESPONSE=$(jq -r '.result // empty' "$CLAUDE_STDOUT")
+  COST=$(jq -r '.total_cost_usd // 0' "$CLAUDE_STDOUT")
+  TURNS=$(jq -r '.num_turns // 0' "$CLAUDE_STDOUT")
+
+  rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
+
+  if [[ -z "$RESPONSE" ]]; then
+    log "  claude retornou response vazia — pulando"
+    FAILED=$((FAILED+1))
+    continue
+  fi
+
+  log "  resposta (turns=$TURNS cost=\$$COST): ${RESPONSE:0:120}"
+
+  # ── Envia via Evolution REST ──
+  EVO_NUMBER="${IDENTIFIER#+}"   # remove leading +
+  EVO_PAYLOAD=$(jq -nc \
+    --arg number "$EVO_NUMBER" \
+    --arg text "$RESPONSE" \
+    '{number: $number, text: $text}')
+
+  SEND_RESP=$(curl -fsS --max-time 20 -X POST \
+    -H "apikey: ${EVOLUTION_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "$EVO_PAYLOAD" \
+    "${EVOLUTION_API_URL}/message/sendText/${INSTANCE}" 2>&1)
+  SEND_CODE=$?
+
+  if [[ $SEND_CODE -ne 0 ]]; then
+    log "  Evolution sendText falhou: ${SEND_RESP:0:300}"
+    FAILED=$((FAILED+1))
+    continue
+  fi
+
+  log "  enviado OK"
+
+  # ── Marca lida via worker REST ──
+  curl -fsS --max-time 10 -X POST \
+    -H "X-Agent-Token: ${WORKER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -nc --arg s "tick-mark-read" --arg t "marked id=$ID by $TICK_ID" '{source: $s, text: $t}')" \
+    "${WORKER_URL}/debug" >/dev/null 2>&1
+
+  # Mark via worker MCP /mark-read — usar SQL direto via /debug post + UPDATE? Não tem rota.
+  # Como /inbox-debug retorna processed_at e MCP inbox_mark_read existe mas requer transport MCP,
+  # vou adicionar rota REST POST /inbox-debug/mark/<id> no worker em paralelo.
+  # Por enquanto, faço POST que marca via worker
+  curl -fsS --max-time 10 -X POST \
+    -H "X-Agent-Token: ${WORKER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -nc --arg id "$ID" '{id: ($id|tonumber), processed_by: "tick"}')" \
+    "${WORKER_URL}/inbox-debug/mark-read" >/dev/null 2>&1
+
+  TOTAL_COST=$(awk -v t="$TOTAL_COST" -v c="$COST" 'BEGIN { print t + c }')
+  PROCESSED=$((PROCESSED+1))
+
+  # Cap por tick? Se já passou cost_cap_usd_per_tick, para.
+  TICK_CAP=$(yq -r '.guardrails.cost_cap_usd_per_tick // 0.10' "$WORKSPACE/scripts/cadencia.yml")
+  OVER_T=$(awk -v t="$TOTAL_COST" -v cap="$TICK_CAP" 'BEGIN { print (t >= cap) ? 1 : 0 }')
+  if [[ "$OVER_T" == "1" ]]; then
+    log "cap por tick (\$$TICK_CAP) atingido; restantes ficam pro próximo trigger"
     break
   fi
-  log "git pull falhou (tentativa $i/3)"
-  [[ $i -lt 3 ]] && sleep $((i*2))
-done
+done <<< "$ITEMS"
 
-# ── 3. Carrega perfil ───────────────────────────────────────────────────
-PROFILE_JSON=$(yq -o=json ".profiles.$PROFILE" "$CADENCIA")
-ENABLED=$(jq -r '.enabled // true' <<<"$PROFILE_JSON")
-if [[ "$ENABLED" != "true" ]]; then
-  log "perfil $PROFILE desabilitado em cadencia.yml; encerrando"
-  exit 0
-fi
-MAX_TURNS=$(jq -r '.max_turns_per_workspace // 10' <<<"$PROFILE_JSON")
-CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 90' "$CADENCIA")
+# Log final
+echo "{\"tick_id\":\"$TICK_ID\",\"cost_usd\":$TOTAL_COST,\"processed\":$PROCESSED,\"failed\":$FAILED,\"at\":\"$(date -u +%FT%TZ)\"}" >> "$COST_FILE"
 
-# Modelo: usa o do user-settings.json. Permite override por env.
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
-
-# ── 4. Invoca Claude com TIMEOUT DURO de wall clock ────────────────────
-log "invocando claude (model=$CLAUDE_MODEL max-turns=$MAX_TURNS timeout=${CLAUDE_TIMEOUT}s) cwd=$WORKSPACE"
-
-CLAUDE_LOG="${LOG_DIR}/claude.${TICK_ID}.log"
-CLAUDE_STDOUT=$(mktemp)
-CLAUDE_STDERR=$(mktemp)
-
-# `timeout` mata o processo após CLAUDE_TIMEOUT segundos.
-# Exit 124 = timeout hit; outros exits = comportamento normal do claude.
-(
-  cd "$WORKSPACE"
-  timeout "${CLAUDE_TIMEOUT}s" claude --print \
-    --model "$CLAUDE_MODEL" \
-    --max-turns "$MAX_TURNS" \
-    --output-format json \
-    --append-system-prompt "$(cat "$WORKSPACE/scripts/tick-prompt.md")" \
-    <<<"TICK_ID=$TICK_ID PROFILE=$PROFILE" \
-    > "$CLAUDE_STDOUT" 2> "$CLAUDE_STDERR"
-)
-CLAUDE_EXIT=$?
-if [[ $CLAUDE_EXIT -eq 124 ]]; then
-  log "claude TIMEOUT após ${CLAUDE_TIMEOUT}s — limit duro de wall clock"
-fi
-log "claude exit=$CLAUDE_EXIT"
-log "claude stdout size=$(wc -c < "$CLAUDE_STDOUT") bytes; stderr size=$(wc -c < "$CLAUDE_STDERR") bytes"
-
-# Salva os outputs no log dir
-cp "$CLAUDE_STDOUT" "$CLAUDE_LOG.stdout" 2>/dev/null
-cp "$CLAUDE_STDERR" "$CLAUDE_LOG.stderr" 2>/dev/null
-
-# Mostra primeiras linhas de stderr no /debug (se houver)
-if [[ -s "$CLAUDE_STDERR" ]]; then
-  head -20 "$CLAUDE_STDERR" 2>/dev/null | while IFS= read -r l; do log "  claude-err> $l"; done
-fi
-# Mostra um trecho do stdout
-if [[ -s "$CLAUDE_STDOUT" ]]; then
-  # Posta o JSON inteiro em 1 chunk se < 4000 chars; senão chunks de 2500.
-  size=$(wc -c < "$CLAUDE_STDOUT")
-  if [[ $size -lt 4000 ]]; then
-    cat "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out> $line")
-  else
-    head -c 2500 "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out[1]> $line")
-    tail -c 2500 "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out[2]> $line")
-  fi
-fi
-
-if [[ $CLAUDE_EXIT -ne 0 ]]; then
-  log "claude failed; abortando tick"
-  rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
-  exit 0
-fi
-
-CLAUDE_OUT=$(cat "$CLAUDE_STDOUT")
-rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
-
-# ── 5. Parse custo do output ────────────────────────────────────────────
-TICK_COST=$(jq -r '.total_cost_usd // .cost_usd // 0' <<<"$CLAUDE_OUT" 2>/dev/null || echo 0)
-TICK_TURNS=$(jq -r '.num_turns // 0' <<<"$CLAUDE_OUT" 2>/dev/null || echo 0)
-echo "{\"tick_id\":\"$TICK_ID\",\"cost_usd\":$TICK_COST,\"turns\":$TICK_TURNS,\"at\":\"$(date -u +%FT%TZ)\"}" >> "$COST_FILE"
-log "tick OK cost=\$$TICK_COST turns=$TICK_TURNS"
-
-# ── 6. Commit + push se houve mudancas ──────────────────────────────────
-cd "$WORKSPACE"
-if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A
-  git -c user.name="agente-${AGENT_NAME:-mercurio}" \
-      -c user.email="${AGENT_EMAIL:-agent@beeads.com.br}" \
-      commit -m "tick $TICK_ID cost=\$$TICK_COST turns=$TICK_TURNS" \
-      >>"$LOG_DIR/git.log" 2>&1 || true
-  for i in 1 2 3; do
-    if git push >>"$LOG_DIR/git.log" 2>&1; then break; fi
-    [[ $i -lt 3 ]] && sleep $((i*2))
-  done
-fi
-
-date -u +%FT%TZ > "$WORKSPACE/.last-tick"
-log "end"
+log "end processed=$PROCESSED failed=$FAILED total_cost=\$$TOTAL_COST"

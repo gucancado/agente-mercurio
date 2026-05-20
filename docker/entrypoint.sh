@@ -6,9 +6,23 @@
 #   3. Registra MCPs user-scope
 #   4. Gera crontab a partir de scripts/cadencia.yml
 #   5. Exec supercronic
-set -euo pipefail
 
 log() { echo "[entrypoint $(date -u +%FT%TZ)] $*"; }
+
+# Em caso de erro, mantém container vivo por 10min pra log inspection via Coolify.
+on_error() {
+  log "FAILED at line $1 with exit $2 — sleeping 600s for inspection"
+  sleep 600
+  exit "$2"
+}
+trap 'on_error $LINENO $?' ERR
+set -uo pipefail
+set -E
+
+log "boot — AGENT_NAME=${AGENT_NAME:-unknown} EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE:-unset}"
+log "PWD=$(pwd)  USER=$(whoami)  uid=$(id -u)"
+log "/workspace contents:"
+ls -la /workspace 2>&1 | head -20 | sed 's/^/  /'
 
 WORKSPACE=/workspace
 HOME_DIR="${HOME:-/home/agent}"

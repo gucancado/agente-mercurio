@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # flock e coreutils via util-linux (default no node:24-slim Debian)
 
-# yq (mikefarah, Go binary)
+# yq (mikefarah, Go binary). Pinado pra evitar flakiness em latest/download.
 RUN curl -fsSL -o /usr/local/bin/yq \
-      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
+      "https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64" \
     && chmod +x /usr/local/bin/yq
 
 # supercronic

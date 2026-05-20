@@ -134,7 +134,13 @@ while IFS= read -r ITEM; do
     "${WORKER_URL}/lead-state?channel=${CHANNEL}&identifier=$(jq -rn --arg v "$IDENTIFIER" '$v|@uri')" \
     2>/dev/null || echo '{"state":null,"exists":false}')
   LEAD_STATE=$(jq -c '.state // {}' <<<"$STATE_RESP")
-  log "  lead_state: $(jq -c '. | tostring | .[0:120]' <<<"$LEAD_STATE")"
+  STATE_EXISTS=$(jq -r '.exists // false' <<<"$STATE_RESP")
+  if [[ "$STATE_EXISTS" == "true" ]]; then
+    IS_FIRST_MESSAGE="false"
+  else
+    IS_FIRST_MESSAGE="true"
+  fi
+  log "  lead_state: $(jq -c '. | tostring | .[0:120]' <<<"$LEAD_STATE") | is_first=$IS_FIRST_MESSAGE"
 
   # ── 4b. Sugere slots SE estado indicar próxima ação de marcar reunião ──
   # Heurística: se proxima_acao.tipo == "marcar_reuniao" OU temperatura == "quente",
@@ -162,6 +168,10 @@ $PLAYBOOK
 $PROJECT_BRIEF
 == fim PROJECT.md ==
 
+<is_first_message>
+$IS_FIRST_MESSAGE
+</is_first_message>
+
 <lead_state>
 $LEAD_STATE
 </lead_state>
@@ -180,15 +190,30 @@ channel: $CHANNEL
 $TEXT
 </lead_message>
 
-INSTRUÇÕES FINAIS:
-- Use APENAS o playbook + project + lead_state pra decidir.
-- Saída EXATA no formato <reply>...</reply><state_patch>{...}</state_patch><actions>[...]</actions>.
-- O <reply> vai literal pro WhatsApp — sem prefixo, sem aspas externas.
-- Disclosure ("Sou agente automatizada da BeeAds, operada por humanos") só na PRIMEIRA mensagem da thread (state vazio ou sem fatos_coletados.nome). Em mensagens seguintes, omitir — é redundante e cansa.
-- Se state.qualificacao tem 3+ dimensões em "ok"/"fraco" (não-desconhecido), pare de qualificar — proponha reunião com slots do <context_slots> AGORA. Não cavar mais a dimensão faltante.
-- Não repita reconhecimentos já presentes em fatos_coletados ou tags do state (ex: se tag "healthcare" já existe, não dizer "clínica é um nicho que a gente trabalha bastante" de novo).
-- state_patch faz merge top-level com estado salvo — envie só campos que mudaram.
-- actions vazio [] quando não há ação além de responder.
+INSTRUÇÕES FINAIS (LEIA CADA UMA E APLIQUE):
+
+1. SAUDAÇÃO E DISCLOSURE: Use a tag <is_first_message> acima. Se for "true", inclua "Oi <nome>! Sou a Mel, agente automatizada da BeeAds — operada por humanos." na primeira frase. Se for "false", NÃO comece com "Oi <nome>", NÃO repita o disclosure, NÃO se apresente. Vá direto ao conteúdo. Esta regra é absoluta — repetir saudação é o erro número um.
+
+2. TOM (registro corporativo profissional, NÃO oral):
+   Palavras PROIBIDAS (substitua sempre):
+     • "a gente" → "nós" / "somos" / "estamos" / "a BeeAds"
+     • "tá" → "está"
+     • "pra" → "para"
+     • "beleza" → "certo" / "perfeito" / omitir
+     • "rola" / "rola bastante" → "é interessante" / "trabalhamos bastante com"
+     • "show" → "ótimo" / omitir
+     • "tranquilo" → "sem problema" / "claro"
+     • "viu?" / "tá?" no final → omitir
+   Exemplo CORRETO: "Clínica de estética é um nicho muito interessante. Trabalhamos bastante com esse perfil."
+   Exemplo PROIBIDO: "Clínica de estética é nicho que a gente trabalha bastante."
+
+3. ESCOPO E AÇÃO: Use APENAS o playbook + project + lead_state. Saída EXATA: <reply>...</reply><state_patch>{...}</state_patch><actions>[...]</actions>. O <reply> vai literal pro WhatsApp (sem prefixo, sem aspas).
+
+4. PROPOR REUNIÃO: Se state.qualificacao tem 3+ dimensões em "ok"/"fraco" (não-desconhecido), pare de qualificar — proponha reunião com slots do <context_slots> AGORA.
+
+5. NÃO REPITA reconhecimento que já está refletido em tags/fatos_coletados (ex: tag "healthcare" já existe → não dizer "clínica é nicho interessante" de novo).
+
+6. state_patch faz merge top-level — envie só campos que mudaram. actions=[] quando só responde.
 EOF
 )
 

@@ -45,13 +45,16 @@ ENV AGENT_NAME=${AGENT_NAME}
 COPY --chown=agent:agent . /workspace
 WORKDIR /workspace
 
-# Permissões dos scripts
-RUN chmod +x /workspace/scripts/tick.sh \
-             /workspace/_platform/mcp-bootstrap.sh \
-             /workspace/docker/entrypoint.sh \
+# Normaliza line endings (caso git autoredline tenha enfiado CRLF em arquivos .sh
+# durante checkout no host Windows) + permissões dos scripts.
+RUN find /workspace -name '*.sh' -type f -exec sed -i 's/\r$//' {} \; \
+    && chmod +x /workspace/scripts/tick.sh \
+                /workspace/_platform/mcp-bootstrap.sh \
+                /workspace/docker/entrypoint.sh \
     && find /workspace/scripts/lib -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true \
     && chown -R agent:agent /workspace /home/agent
 
 USER agent
 
-ENTRYPOINT ["/workspace/docker/entrypoint.sh"]
+# Invoca bash explicitamente pra blindar contra problema de shebang/CRLF.
+ENTRYPOINT ["bash", "/workspace/docker/entrypoint.sh"]

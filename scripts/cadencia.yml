@@ -11,7 +11,7 @@ profiles:
     rotina: null
     list_filter:
       status: [pending, in_progress]
-    max_turns_per_workspace: 10      # MVP enxuto (era 50 — gastou demais com Sonnet em loops)
+    max_turns_per_workspace: 30      # Haiku gasta 3-5 turnos por item; 30 cobre processar 5-6 items por tick
 
   daily:
     enabled: false                   # desligado no MVP — mercurio só roda responsive

@@ -16,9 +16,9 @@ profiles:
     max_turns_per_workspace: 50
 
   daily:
-    enabled: true
+    enabled: false                   # desligado no MVP — mercurio só roda responsive
     crons:
-      - "0 8 * * 1-5"                # 08:00 dias úteis
+      - "0 8 * * 1-5"
     timezone: America/Sao_Paulo
     rotina: rotina-matinal.md
     list_filter:
@@ -51,6 +51,6 @@ profiles:
 # Atendente típico: ~$1.80/dia. Cap 2.7x = $5.00.
 # Calibrar por agente (atendente vs batch têm perfis diferentes — ver SPEC §17.4).
 guardrails:
-  cost_cap_usd_per_day: 5.00
-  cost_cap_usd_per_tick: 0.50
+  cost_cap_usd_per_day: 3.00      # MVP conservador; subir após primeiro mês com dados reais
+  cost_cap_usd_per_tick: 0.30
   alert_threshold_pct: 80

@@ -1,10 +1,14 @@
 {
   "version": 1,
+  "comment": "Em modo v0.6 (inbox-driven, sem Bloquim sync), workspace_id pode ser null. Fonte de verdade do FS é o slug. Quando Bloquim sync for ativado, preencher workspace_id.",
   "workspaces": [
     {
-      "id": "REPLACE_WITH_WORKSPACE_ID_SISTEMA",
-      "name": "Sistema",
-      "slug": "_sistema"
+      "id": null,
+      "name": "metido-a-gente",
+      "slug": "metido-a-gente",
+      "evolution_instance": "mercurio-metido-a-gente",
+      "whatsapp_number": "+5531977786735",
+      "persona_name": "Mel"
     }
   ]
 }

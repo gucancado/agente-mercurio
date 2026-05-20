@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "whatsapp": {
+      "command": "npx",
+      "args": ["-y", "@aiteks-ltda/mcp-evolution-whatsapp-api"],
+      "env": {
+        "EVOLUTION_API_URL": "https://evolution.beeads.com.br",
+        "EVOLUTION_API_KEY": "${EVOLUTION_API_KEY}",
+        "EVOLUTION_INSTANCE": "mercurio-metido-a-gente"
+      }
+    }
+  }
+}

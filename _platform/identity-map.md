@@ -1,36 +1,47 @@
-# Identidade do agente
+# Identidade do agente mercurio
 
-> Substituir todos os `<placeholders>` ao instanciar o template.
-
-## Identidade externa
+## Identidade técnica (1:1)
 
 | Recurso | Valor |
 |---|---|
-| Nome do agente | `<NOME>` |
-| Função | `<SDR / gestor de tráfego / analista / ...>` |
-| Conta Google | `<nome>@beeads.com.br` (Workspace) ou `<nome>@gmail.com` |
-| WhatsApp | +55 31 9XXXX-XXXX |
-| Bloquim user | mesmo email da conta Google |
-| GitHub PAT | env var `<NOME_UPPER>_GITHUB_TOKEN` (Coolify) |
-| Anthropic workspace | `beeads-<nome>` |
-| Evolution instance | `<nome>` |
-| Worker token | env var `<NOME_UPPER>_WORKER_TOKEN` (Coolify) |
+| Nome técnico | `mercurio` |
+| Função | Agente atendente WhatsApp multi-persona |
+| Repo Git | `gucancado/agente-mercurio` (público) |
+| Container Coolify | `agente-mercurio` no projeto `semente-platform` |
+| Conta Anthropic | workspace existente do owner (API key em env `ANTHROPIC_API_KEY`) |
+| GitHub PAT | não usa (repo público) |
+| Worker token | env var `MERCURIO_WORKER_TOKEN` (32 bytes hex aleatório) |
+| User Bloquim | a definir (sync com Bloquim é opcional v0.6+) |
+| Owner | Gustavo Cançado de Azevedo |
+| Provisionado em | 2026-05-20 |
 
 ## Cadência
 
-Perfis ativos: `<responsive | daily | batch | urgent_only>` (configuração em `scripts/cadencia.yml`).
+Perfis ativos: `responsive` (5min comercial / 30min fora; processa inbox a cada tick). Configuração em `scripts/cadencia.yml`.
 
-## Owner e governança
+## Personas (1 por projeto)
 
-- Owner: Gustavo Cançado de Azevedo (`gucancado`)
-- Provisionado em: `<YYYY-MM-DD>`
+### Projeto `metido-a-gente`
+
+| Campo | Valor |
+|---|---|
+| Persona pública | **Mel** |
+| Instância Evolution | `mercurio-metido-a-gente` |
+| Instance UUID | `3fb4de6a-57bf-469d-9af4-5600c556b1bf` |
+| Instance hash | `03512C7D-F379-460C-BADD-F0D387574E72` |
+| Número WhatsApp | +55 31 9778-6735 (temporário) |
+| Conta Google | n/a (sem email/Drive nessa persona) |
+| Workspace Bloquim | n/a (Bloquim sync desligado no MVP) |
+| Provisionada em | 2026-05-20 |
+
+Briefing completo em `projetos/metido-a-gente/PROJECT.md`.
+
+## Governança
+
 - Política de aprovação: `_base/policies/approval.yml`
 - Approvers: `_platform/approvers.yml`
-
-## Workspaces atendidos
-
-Lista canônica em `_platform/workspace-map.json`. Esta seção é informativa apenas.
+- Workspaces no FS: `_platform/workspace-map.json`
 
 ## Histórico
 
-- `<YYYY-MM-DD>`: provisionamento inicial
+- 2026-05-20: agente provisionado. Persona Mel ativada no projeto metido-a-gente.

@@ -6,9 +6,7 @@ profiles:
   responsive:
     enabled: true
     crons:
-      - "*/5 9-19 * * 1-5"           # comercial: 5min
-      - "*/30 0-8,20-23 * * 1-5"     # off-hours dias úteis
-      - "*/30 * * * 0,6"             # fim de semana
+      - "* * * * *"                  # MODO TESTE: a cada 1 minuto, sem janela horária
     timezone: America/Sao_Paulo
     rotina: null
     list_filter:

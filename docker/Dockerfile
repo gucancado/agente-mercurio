@@ -40,21 +40,24 @@ RUN groupadd -g 1001 agent && useradd -m -u 1001 -g 1001 -s /bin/bash agent
 ARG AGENT_NAME=mercurio
 ENV AGENT_NAME=${AGENT_NAME}
 
-# Copia repo do agente. Em produção, /workspace é volume Coolify
-# (sobrescreve esta cópia) — esta é fallback de primeira inicialização.
-COPY --chown=agent:agent . /workspace
+# Repo do agente em DOIS lugares:
+# - /opt/agent/seed/   imagem-side, NUNCA sobrescrita por volume Coolify
+# - /workspace/        volume Coolify (montado em runtime; se vazio, entrypoint copia do seed)
+# Entrypoint vive em /opt/agent/ porque ENTRYPOINT precisa de path estável
+# (volume Coolify monta /workspace vazio se ainda não existia).
+COPY --chown=agent:agent . /opt/agent/seed
+
+# Normaliza line endings e permissões em /opt/agent/seed
+RUN find /opt/agent/seed -name '*.sh' -type f -exec sed -i 's/\r$//' {} \; \
+    && chmod +x /opt/agent/seed/scripts/tick.sh \
+                /opt/agent/seed/_platform/mcp-bootstrap.sh \
+                /opt/agent/seed/docker/entrypoint.sh \
+    && find /opt/agent/seed/scripts/lib -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true \
+    && mkdir -p /workspace \
+    && chown -R agent:agent /opt/agent /workspace /home/agent
+
 WORKDIR /workspace
-
-# Normaliza line endings (caso git autoredline tenha enfiado CRLF em arquivos .sh
-# durante checkout no host Windows) + permissões dos scripts.
-RUN find /workspace -name '*.sh' -type f -exec sed -i 's/\r$//' {} \; \
-    && chmod +x /workspace/scripts/tick.sh \
-                /workspace/_platform/mcp-bootstrap.sh \
-                /workspace/docker/entrypoint.sh \
-    && find /workspace/scripts/lib -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true \
-    && chown -R agent:agent /workspace /home/agent
-
 USER agent
 
-# Invoca bash explicitamente pra blindar contra problema de shebang/CRLF.
-ENTRYPOINT ["bash", "/workspace/docker/entrypoint.sh"]
+# Entrypoint fora do volume; vai popular /workspace se necessário.
+ENTRYPOINT ["bash", "/opt/agent/seed/docker/entrypoint.sh"]

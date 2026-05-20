@@ -1,97 +1,130 @@
 #!/bin/bash
-# Entrypoint do container do agente. Roda na inicialização do container Coolify.
-# Sequência:
-#   1. Prepara ~/.claude com stub user-scope (NÃO espelha host do owner)
-#   2. Symlinks de skills (_base + obsidian)
-#   3. Registra MCPs user-scope
-#   4. Gera crontab a partir de scripts/cadencia.yml
-#   5. Exec supercronic
+# Entrypoint do container do agente.
+# Versão debug: NÃO sai em erro; loga absolutamente tudo + sleep infinity ao fim.
+
+set +e   # nada de exit em erro
+exec 2>&1
 
 log_local() { echo "[entrypoint $(date -u +%FT%TZ)] $*"; }
 
-# log() — escreve local E posta no worker /debug pra owner inspecionar via curl
+# log() — local + POST /debug do worker
 log() {
   log_local "$*"
   if [[ -n "${WORKER_URL:-}" && -n "${WORKER_TOKEN:-}" ]]; then
     curl -fsS --max-time 5 -X POST \
       -H "X-Agent-Token: ${WORKER_TOKEN}" \
       -H "Content-Type: application/json" \
-      -d "$(jq -nc --arg s "entrypoint" --arg t "$*" '{source: $s, text: $t}')" \
-      "${WORKER_URL}/debug" >/dev/null 2>&1 || true
+      -d "$(jq -nc --arg s "entrypoint" --arg t "$*" '{source: $s, text: $t}' 2>/dev/null)" \
+      "${WORKER_URL}/debug" >/dev/null 2>&1
   fi
 }
 
-on_error() {
-  log "FAILED at line $1 with exit $2 — sleeping 600s for inspection"
-  sleep 600
-  exit "$2"
-}
-trap 'on_error $LINENO $?' ERR
-set -uo pipefail
-set -E
+log "ENTRYPOINT START pid=$$"
+log "user=$(whoami) uid=$(id -u) home=$HOME pwd=$(pwd)"
+log "WORKER_URL set: $([[ -n "${WORKER_URL:-}" ]] && echo yes || echo no)"
+log "WORKER_TOKEN len: ${#WORKER_TOKEN:-0}"
+log "AGENT_NAME=${AGENT_NAME:-UNSET}  EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE:-UNSET}"
+log "ANTHROPIC_API_KEY len: ${#ANTHROPIC_API_KEY}"
 
-log "boot — AGENT_NAME=${AGENT_NAME:-unknown} EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE:-unset}"
-log "PWD=$(pwd)  USER=$(whoami)  uid=$(id -u)"
-log "/workspace listing first 20 entries:"
-ls -la /workspace 2>&1 | head -20 | while IFS= read -r line; do log_local "  $line"; done
+log "tools check:"
+log "  bash: $(command -v bash)"
+log "  jq: $(command -v jq) -- $(jq --version 2>&1)"
+log "  yq: $(command -v yq) -- $(yq --version 2>&1)"
+log "  curl: $(command -v curl)"
+log "  supercronic: $(command -v supercronic) -- $(supercronic --version 2>&1 | head -1 || echo missing)"
+log "  claude: $(command -v claude) -- $(claude --version 2>&1 | head -1 || echo missing)"
+log "  git: $(command -v git)"
+
+log "/workspace existe? $([[ -d /workspace ]] && echo sim || echo NÃO)"
+if [[ -d /workspace ]]; then
+  log "/workspace entries (top 15):"
+  ls -la /workspace 2>&1 | head -16 | while IFS= read -r line; do log_local "  $line"; done
+
+  log "/workspace/_platform/user-claude.md existe? $([[ -f /workspace/_platform/user-claude.md ]] && echo sim || echo NÃO)"
+  log "/workspace/scripts/cadencia.yml existe? $([[ -f /workspace/scripts/cadencia.yml ]] && echo sim || echo NÃO)"
+fi
 
 WORKSPACE=/workspace
 HOME_DIR="${HOME:-/home/agent}"
 CLAUDE_HOME="${HOME_DIR}/.claude"
 
-log "AGENT_NAME=${AGENT_NAME:-unknown}"
-
-# ─── 1. User-scope no container ────────────────────────────────────────────
+# ── 1. ~/.claude
 mkdir -p "$CLAUDE_HOME/skills"
-cp "$WORKSPACE/_platform/user-claude.md" "$CLAUDE_HOME/CLAUDE.md"
-cp "$WORKSPACE/_platform/user-settings.json" "$CLAUDE_HOME/settings.json"
-log "user-scope files copied"
+if [[ -f "$WORKSPACE/_platform/user-claude.md" ]]; then
+  cp "$WORKSPACE/_platform/user-claude.md" "$CLAUDE_HOME/CLAUDE.md"
+  log "copied user-claude.md"
+else
+  log "WARN: $WORKSPACE/_platform/user-claude.md NÃO existe"
+fi
 
-# ─── 2. Symlinks de skills compartilhadas ──────────────────────────────────
-ln -sfn "$WORKSPACE/_base/skills" "$CLAUDE_HOME/skills/_base"
+if [[ -f "$WORKSPACE/_platform/user-settings.json" ]]; then
+  cp "$WORKSPACE/_platform/user-settings.json" "$CLAUDE_HOME/settings.json"
+  log "copied user-settings.json"
+fi
+
+# ── 2. Symlinks skills
+ln -sfn "$WORKSPACE/_base/skills" "$CLAUDE_HOME/skills/_base" 2>&1
+log "symlink _base: $?"
 if [[ -d /opt/skills/obsidian-skills ]]; then
-  ln -sfn /opt/skills/obsidian-skills "$CLAUDE_HOME/skills/obsidian"
+  ln -sfn /opt/skills/obsidian-skills "$CLAUDE_HOME/skills/obsidian" 2>&1
+  log "symlink obsidian: $?"
 fi
-log "skills symlinks created"
 
-# ─── 3. MCPs user-scope ────────────────────────────────────────────────────
+# ── 3. MCPs user-scope (opcional)
 if [[ -x "$WORKSPACE/_platform/mcp-bootstrap.sh" ]]; then
-  "$WORKSPACE/_platform/mcp-bootstrap.sh" || log "mcp-bootstrap encontrou problemas (continuing)"
+  log "running mcp-bootstrap..."
+  "$WORKSPACE/_platform/mcp-bootstrap.sh" 2>&1 | while IFS= read -r l; do log_local "mcp> $l"; done
 fi
 
-# ─── 4. Gerar crontab a partir de cadencia.yml ─────────────────────────────
-# Em /home/agent porque o container roda como usuário não-root sem write em /etc.
+# ── 4. Crontab
 CRONTAB="${HOME_DIR}/agent-crontab"
 : > "$CRONTAB"
 
-# Para cada perfil habilitado, emite uma linha por entry de cron.
-PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml")
-for PROFILE in $PROFILES; do
-  ENABLED=$(yq -r ".profiles.$PROFILE.enabled // true" "$WORKSPACE/scripts/cadencia.yml")
-  if [[ "$ENABLED" != "true" ]]; then
-    log "perfil $PROFILE desabilitado"
-    continue
-  fi
-  TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
-  CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml")
-  while IFS= read -r CRON_EXPR; do
-    [[ -z "$CRON_EXPR" ]] && continue
-    echo "CRON_TZ=$TZ $CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" \
-      >> "$CRONTAB"
-  done <<< "$CRONS"
-done
+if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
+  PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml" 2>&1)
+  log "perfis em cadencia.yml: $PROFILES"
+  for PROFILE in $PROFILES; do
+    ENABLED=$(yq -r ".profiles.$PROFILE.enabled // true" "$WORKSPACE/scripts/cadencia.yml")
+    if [[ "$ENABLED" != "true" ]]; then
+      log "  $PROFILE desabilitado"
+      continue
+    fi
+    TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
+    CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml")
+    while IFS= read -r CRON_EXPR; do
+      [[ -z "$CRON_EXPR" ]] && continue
+      echo "CRON_TZ=$TZ $CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" >> "$CRONTAB"
+    done <<< "$CRONS"
+  done
+  log "crontab gerado em $CRONTAB:"
+  cat "$CRONTAB" 2>&1 | while IFS= read -r l; do log_local "  cron> $l"; done
+else
+  log "WARN: cadencia.yml ausente"
+fi
 
-log "crontab gerado:"
-cat "$CRONTAB" | sed 's/^/  /'
+# ── 5. Volumes
+mkdir -p "$WORKSPACE/.logs" "$WORKSPACE/.cost" "$WORKSPACE/.locks" 2>&1
+log "diretórios runtime criados"
 
-# ─── 5. Volumes esperados ──────────────────────────────────────────────────
-mkdir -p "$WORKSPACE/.logs" "$WORKSPACE/.cost" "$WORKSPACE/.locks"
+# ── 6. Git identity
+git config --global user.name "agente-${AGENT_NAME:-mercurio}" 2>&1
+git config --global user.email "${AGENT_EMAIL:-agent@beeads.com.br}" 2>&1
+git config --global pull.rebase true 2>&1
+log "git config OK"
 
-# ─── 6. Configura identity para git commits ────────────────────────────────
-git config --global user.name "agente-${AGENT_NAME:-unknown}"
-git config --global user.email "${AGENT_EMAIL:-agent@beeads.com.br}"
-git config --global pull.rebase true
+# ── 7. Supercronic
+if [[ ! -s "$CRONTAB" ]]; then
+  log "WARN: crontab vazio — não há perfis habilitados; sleep infinity"
+  sleep infinity
+fi
 
-# ─── 7. Exec supercronic ───────────────────────────────────────────────────
-log "starting supercronic"
-exec supercronic "$CRONTAB"
+log "starting supercronic..."
+supercronic "$CRONTAB" &
+SUPER_PID=$!
+log "supercronic pid=$SUPER_PID"
+
+# Espera supercronic. Se ele exitar, NÃO sai o container — sleep infinity pra debug.
+wait $SUPER_PID
+EXIT=$?
+log "supercronic exited with $EXIT — sleeping infinity for debug"
+sleep infinity

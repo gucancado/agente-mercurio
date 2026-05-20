@@ -96,22 +96,24 @@ CRONTAB="${HOME_DIR}/agent-crontab"
 
 if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
   PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml" 2>&1)
-  log "perfis em cadencia.yml: $PROFILES"
+  log "perfis em cadencia.yml: $(echo "$PROFILES" | tr '\n' ',')"
   for PROFILE in $PROFILES; do
     ENABLED=$(yq -r ".profiles.$PROFILE.enabled // true" "$WORKSPACE/scripts/cadencia.yml")
-    if [[ "$ENABLED" != "true" ]]; then
-      log "  $PROFILE desabilitado"
-      continue
-    fi
+    log "  $PROFILE enabled=$ENABLED"
+    if [[ "$ENABLED" != "true" ]]; then continue; fi
     TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
-    CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml")
+    CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml" 2>&1)
+    log "    TZ=$TZ"
+    log "    crons raw: $(echo "$CRONS" | tr '\n' '|')"
     while IFS= read -r CRON_EXPR; do
       [[ -z "$CRON_EXPR" ]] && continue
       echo "CRON_TZ=$TZ $CRON_EXPR /workspace/scripts/tick.sh $PROFILE >> /workspace/.logs/supercronic.log 2>&1" >> "$CRONTAB"
+      log "    + $CRON_EXPR"
     done <<< "$CRONS"
   done
-  log "crontab gerado em $CRONTAB:"
-  cat "$CRONTAB" 2>&1 | while IFS= read -r l; do log_local "  cron> $l"; done
+  CRONTAB_LINES=$(wc -l < "$CRONTAB" 2>&1)
+  log "crontab gerado: $CRONTAB_LINES linhas em $CRONTAB"
+  cat "$CRONTAB" 2>&1 | while IFS= read -r l; do log "  cron> $l"; done
 else
   log "WARN: cadencia.yml ausente"
 fi

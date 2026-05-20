@@ -98,11 +98,11 @@ if [[ -f "$WORKSPACE/scripts/cadencia.yml" ]]; then
   PROFILES=$(yq -r '.profiles | keys | .[]' "$WORKSPACE/scripts/cadencia.yml" 2>&1)
   log "perfis em cadencia.yml: $(echo "$PROFILES" | tr '\n' ',')"
   for PROFILE in $PROFILES; do
-    # `// true` é armadilha — yq/jq tratam `false` como falsy e caem no default.
-    # Uso `if has("enabled") then .enabled else true end` pra default real.
-    ENABLED=$(yq -r "if .profiles.\"$PROFILE\".enabled == null then true else .profiles.\"$PROFILE\".enabled end" "$WORKSPACE/scripts/cadencia.yml")
+    # yq retorna "true", "false" ou "null" se ausente.
+    # Política: só `false` literal pula; null/true/missing habilita.
+    ENABLED=$(yq -r ".profiles.\"$PROFILE\".enabled" "$WORKSPACE/scripts/cadencia.yml")
     log "  $PROFILE enabled=$ENABLED"
-    if [[ "$ENABLED" != "true" ]]; then continue; fi
+    if [[ "$ENABLED" == "false" ]]; then continue; fi
     TZ=$(yq -r ".profiles.$PROFILE.timezone // \"UTC\"" "$WORKSPACE/scripts/cadencia.yml")
     CRONS=$(yq -r ".profiles.$PROFILE.crons[]" "$WORKSPACE/scripts/cadencia.yml" 2>&1)
     log "    TZ=$TZ"

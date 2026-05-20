@@ -4,7 +4,9 @@
 # Sempre invoca Claude com a skill `processar-inbox`; sem cheap-tick.
 # Custo controlado por max-turns + cost cap diário em cadencia.yml.
 
-set -euo pipefail
+set -uo pipefail
+# NÃO usar set -e — `var=$(cmd)` com cmd falhando mata o script antes de
+# checarmos o exit code. Pegamos exits explicitamente.
 
 PROFILE="${1:?usage: tick.sh <profile>}"
 WORKSPACE=/workspace
@@ -70,10 +72,16 @@ MAX_TURNS=$(jq -r '.max_turns_per_workspace // 50' <<<"$PROFILE_JSON")
 
 # ── 4. Invoca Claude direto na raiz do agente ───────────────────────────
 # Claude carrega CLAUDE.md raiz, descobre projetos via skill processar-inbox.
-log "invocando claude (max-turns=$MAX_TURNS)"
+log "invocando claude (max-turns=$MAX_TURNS) cwd=$WORKSPACE"
+log "  ANTHROPIC_API_KEY len=${#ANTHROPIC_API_KEY}"
+log "  claude version: $(claude --version 2>&1 | head -1)"
 
-CLAUDE_LOG="${LOG_DIR}/claude.${TICK_ID}.json"
-CLAUDE_OUT=$(
+CLAUDE_LOG="${LOG_DIR}/claude.${TICK_ID}.log"
+CLAUDE_STDOUT=$(mktemp)
+CLAUDE_STDERR=$(mktemp)
+
+# Subshell + cd; sem set -e; captura exit explicitamente
+(
   cd "$WORKSPACE"
   claude --print \
     --model claude-sonnet-4-6 \
@@ -81,14 +89,33 @@ CLAUDE_OUT=$(
     --output-format json \
     --append-system-prompt "$(cat "$WORKSPACE/scripts/tick-prompt.md")" \
     <<<"TICK_ID=$TICK_ID PROFILE=$PROFILE" \
-    2>>"$CLAUDE_LOG"
+    > "$CLAUDE_STDOUT" 2> "$CLAUDE_STDERR"
 )
 CLAUDE_EXIT=$?
+log "claude exit=$CLAUDE_EXIT"
+log "claude stdout size=$(wc -c < "$CLAUDE_STDOUT") bytes; stderr size=$(wc -c < "$CLAUDE_STDERR") bytes"
+
+# Salva os outputs no log dir
+cp "$CLAUDE_STDOUT" "$CLAUDE_LOG.stdout" 2>/dev/null
+cp "$CLAUDE_STDERR" "$CLAUDE_LOG.stderr" 2>/dev/null
+
+# Mostra primeiras linhas de stderr no /debug (se houver)
+if [[ -s "$CLAUDE_STDERR" ]]; then
+  head -20 "$CLAUDE_STDERR" 2>/dev/null | while IFS= read -r l; do log "  claude-err> $l"; done
+fi
+# Mostra um trecho do stdout
+if [[ -s "$CLAUDE_STDOUT" ]]; then
+  head -c 1500 "$CLAUDE_STDOUT" 2>/dev/null | tr '\n' ' ' | (read -r line; log "  claude-out> ${line:0:1500}")
+fi
 
 if [[ $CLAUDE_EXIT -ne 0 ]]; then
-  log "claude failed exit=$CLAUDE_EXIT"
+  log "claude failed; abortando tick"
+  rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
   exit 0
 fi
+
+CLAUDE_OUT=$(cat "$CLAUDE_STDOUT")
+rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
 
 # ── 5. Parse custo do output ────────────────────────────────────────────
 TICK_COST=$(jq -r '.total_cost_usd // .cost_usd // 0' <<<"$CLAUDE_OUT" 2>/dev/null || echo 0)

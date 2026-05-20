@@ -1,7 +1,8 @@
 #!/bin/bash
-# tick.sh — v0.7 trigger-based
-# Lê inbox via REST do worker, invoca claude --print pra compor resposta (sem MCP),
-# envia via Evolution REST, marca lida via worker REST.
+# tick.sh — v0.8 SDR
+# Lê inbox via REST do worker, lê lead_state, sugere slots (se aplicável),
+# invoca claude --print pra compor resposta estruturada (<reply>/<state_patch>/<actions>),
+# parseia output, envia WhatsApp, aplica state_patch + actions, marca lida.
 # Disparado por trigger-server.js quando webhook chega.
 
 set -uo pipefail
@@ -35,7 +36,7 @@ if ! flock -n 9; then
   exit 0
 fi
 
-log "start"
+log "start v0.8 SDR"
 
 # ── 1. Cost cap diário ──────────────────────────────────────────────────
 COST_CAP_DAY=$(yq -r '.guardrails.cost_cap_usd_per_day // 3.0' "$WORKSPACE/scripts/cadencia.yml")
@@ -70,12 +71,12 @@ if [[ "$COUNT" == "0" ]]; then
   exit 0
 fi
 
-# ── 3. Configs (model, persona, etc) ────────────────────────────────────
+# ── 3. Configs ─────────────────────────────────────────────────────────
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
-CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 60' "$WORKSPACE/scripts/cadencia.yml")
+CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 90' "$WORKSPACE/scripts/cadencia.yml")
+PLAYBOOK_PATH="$WORKSPACE/_base/playbook-sdr.md"
 
-# ── 4. Loop FIFO (mais antigos primeiro) ────────────────────────────────
-# /inbox-debug retorna DESC por created_at, então invertemos pra processar do mais antigo
+# ── 4. Loop FIFO ────────────────────────────────────────────────────────
 ITEMS=$(jq -c '[.messages[]] | reverse | .[]' <<<"$INBOX_JSON")
 
 TOTAL_COST=0
@@ -84,6 +85,7 @@ FAILED=0
 
 while IFS= read -r ITEM; do
   ID=$(jq -r '.id' <<<"$ITEM")
+  CHANNEL=$(jq -r '.channel' <<<"$ITEM")
   INSTANCE=$(jq -r '.instance' <<<"$ITEM")
   IDENTIFIER=$(jq -r '.identifier' <<<"$ITEM")
   TEXT=$(jq -r '.message_text // "(sem texto)"' <<<"$ITEM")
@@ -99,24 +101,72 @@ while IFS= read -r ITEM; do
     continue
   fi
 
-  # Monta prompt enxuto pro Claude
   PROJECT_BRIEF=$(cat "$PROJECT_DIR/PROJECT.md" 2>/dev/null || echo "(briefing ausente)")
+  PLAYBOOK=$(cat "$PLAYBOOK_PATH" 2>/dev/null || echo "(playbook ausente)")
 
+  # ── 4a. Lê lead_state ──
+  STATE_RESP=$(curl -fsS --max-time 10 \
+    -H "X-Agent-Token: ${WORKER_TOKEN}" \
+    "${WORKER_URL}/lead-state?channel=${CHANNEL}&identifier=$(jq -rn --arg v "$IDENTIFIER" '$v|@uri')" \
+    2>/dev/null || echo '{"state":null,"exists":false}')
+  LEAD_STATE=$(jq -c '.state // {}' <<<"$STATE_RESP")
+  log "  lead_state: $(jq -c '. | tostring | .[0:120]' <<<"$LEAD_STATE")"
+
+  # ── 4b. Sugere slots SE estado indicar próxima ação de marcar reunião ──
+  # Heurística: se proxima_acao.tipo == "marcar_reuniao" OU temperatura == "quente",
+  # já busca slots pra Mel ter contexto disponível.
+  PROXIMA_TIPO=$(jq -r '.proxima_acao.tipo // ""' <<<"$LEAD_STATE")
+  TEMPERATURA=$(jq -r '.temperatura // ""' <<<"$LEAD_STATE")
+  CONTEXT_SLOTS="[]"
+  if [[ "$PROXIMA_TIPO" == "marcar_reuniao" || "$TEMPERATURA" == "quente" ]]; then
+    SLOTS_RESP=$(curl -fsS --max-time 10 \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
+      "${WORKER_URL}/meetings/suggest-slots" 2>/dev/null || echo '{"slots":[]}')
+    CONTEXT_SLOTS=$(jq -c '.slots' <<<"$SLOTS_RESP")
+    log "  pre-fetched slots: $(jq 'length' <<<"$CONTEXT_SLOTS")"
+  fi
+
+  # ── 4c. Monta prompt ──
   PROMPT=$(cat <<EOF
-Você é a persona descrita abaixo (PROJECT.md). Responda a mensagem recebida no WhatsApp.
+Você é a persona descrita em PROJECT.md, operando como SDR seguindo o PLAYBOOK abaixo. Receba a mensagem nova do lead, considere o estado salvo, e responda no formato XML estruturado.
+
+== PLAYBOOK ==
+$PLAYBOOK
+== fim PLAYBOOK ==
 
 == PROJECT.md ==
 $PROJECT_BRIEF
-== fim ==
+== fim PROJECT.md ==
 
-Mensagem recebida de **$IDENTIFIER** (nome WhatsApp: "$PUSH_NAME"):
-"$TEXT"
+<lead_state>
+$LEAD_STATE
+</lead_state>
 
-Compose APENAS o texto da resposta WhatsApp, em PT-BR, curta (1-3 frases). Se é primeira mensagem em thread nova, inclua disclosure ("Sou [persona], agente automatizada da BeeAds, operada por humanos"). Sem aspas externas, sem prefixo "Resposta:". Apenas o texto.
+<context_slots>
+$CONTEXT_SLOTS
+</context_slots>
+
+<lead_info>
+identifier: $IDENTIFIER
+push_name: $PUSH_NAME
+channel: $CHANNEL
+</lead_info>
+
+<lead_message>
+$TEXT
+</lead_message>
+
+INSTRUÇÕES FINAIS:
+- Use APENAS o playbook + project + lead_state pra decidir.
+- Saída EXATA no formato <reply>...</reply><state_patch>{...}</state_patch><actions>[...]</actions>.
+- O <reply> vai literal pro WhatsApp — sem prefixo, sem aspas externas.
+- Se estado é {} (lead novo), inclua disclosure ("Sou agente automatizada da BeeAds, operada por humanos") na primeira frase do reply.
+- state_patch faz merge top-level com estado salvo — envie só campos que mudaram.
+- actions vazio [] quando não há ação além de responder.
 EOF
 )
 
-  # Invoca Claude SEM tools, só geração de texto
+  # ── 4d. Invoca Claude ──
   CLAUDE_STDOUT=$(mktemp)
   CLAUDE_STDERR=$(mktemp)
   (
@@ -139,7 +189,6 @@ EOF
     continue
   fi
 
-  # Parse: pega `result` (texto gerado) e custo
   RESPONSE=$(jq -r '.result // empty' "$CLAUDE_STDOUT")
   COST=$(jq -r '.total_cost_usd // 0' "$CLAUDE_STDOUT")
   TURNS=$(jq -r '.num_turns // 0' "$CLAUDE_STDOUT")
@@ -152,13 +201,39 @@ EOF
     continue
   fi
 
-  log "  resposta (turns=$TURNS cost=\$$COST): ${RESPONSE:0:120}"
+  # ── 4e. Parse <reply>/<state_patch>/<actions> ──
+  REPLY=$(printf '%s' "$RESPONSE" | sed -n '/<reply>/,/<\/reply>/p' | sed '1d;$d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  STATE_PATCH=$(printf '%s' "$RESPONSE" | sed -n '/<state_patch>/,/<\/state_patch>/p' | sed '1d;$d')
+  ACTIONS_RAW=$(printf '%s' "$RESPONSE" | sed -n '/<actions>/,/<\/actions>/p' | sed '1d;$d')
 
-  # ── Envia via Evolution REST ──
-  EVO_NUMBER="${IDENTIFIER#+}"   # remove leading +
+  # Fallback: se não tem tag <reply>, usa output inteiro como fallback (graceful)
+  if [[ -z "$REPLY" ]]; then
+    log "  WARN: sem tag <reply>; usando output inteiro como fallback"
+    REPLY="$RESPONSE"
+  fi
+
+  # Valida JSONs (se inválidos, ignora apenas eles)
+  STATE_PATCH_VALID="{}"
+  if [[ -n "$STATE_PATCH" ]] && echo "$STATE_PATCH" | jq empty >/dev/null 2>&1; then
+    STATE_PATCH_VALID=$(echo "$STATE_PATCH" | jq -c '.')
+  elif [[ -n "$STATE_PATCH" ]]; then
+    log "  WARN: state_patch JSON inválido — ignorando"
+  fi
+
+  ACTIONS_VALID="[]"
+  if [[ -n "$ACTIONS_RAW" ]] && echo "$ACTIONS_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    ACTIONS_VALID=$(echo "$ACTIONS_RAW" | jq -c '.')
+  elif [[ -n "$ACTIONS_RAW" ]]; then
+    log "  WARN: actions JSON inválido — ignorando"
+  fi
+
+  log "  reply (turns=$TURNS cost=\$$COST): ${REPLY:0:120}"
+
+  # ── 4f. Envia via Evolution REST ──
+  EVO_NUMBER="${IDENTIFIER#+}"
   EVO_PAYLOAD=$(jq -nc \
     --arg number "$EVO_NUMBER" \
-    --arg text "$RESPONSE" \
+    --arg text "$REPLY" \
     '{number: $number, text: $text}')
 
   SEND_RESP=$(curl -fsS --max-time 20 -X POST \
@@ -176,17 +251,80 @@ EOF
 
   log "  enviado OK"
 
-  # ── Marca lida via worker REST ──
-  curl -fsS --max-time 10 -X POST \
-    -H "X-Agent-Token: ${WORKER_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$(jq -nc --arg s "tick-mark-read" --arg t "marked id=$ID by $TICK_ID" '{source: $s, text: $t}')" \
-    "${WORKER_URL}/debug" >/dev/null 2>&1
+  # ── 4g. Aplica state_patch ──
+  if [[ "$STATE_PATCH_VALID" != "{}" ]]; then
+    SP_RESP=$(curl -fsS --max-time 10 -X POST \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" --argjson p "$STATE_PATCH_VALID" '{channel:$ch, identifier:$id, patch:$p}')" \
+      "${WORKER_URL}/lead-state" 2>&1)
+    if [[ $? -eq 0 ]]; then
+      log "  state_patch aplicado: $(echo "$STATE_PATCH_VALID" | jq -c '. | tostring | .[0:100]')"
+    else
+      log "  WARN: state_patch falhou: ${SP_RESP:0:200}"
+    fi
+  fi
 
-  # Mark via worker MCP /mark-read — usar SQL direto via /debug post + UPDATE? Não tem rota.
-  # Como /inbox-debug retorna processed_at e MCP inbox_mark_read existe mas requer transport MCP,
-  # vou adicionar rota REST POST /inbox-debug/mark/<id> no worker em paralelo.
-  # Por enquanto, faço POST que marca via worker
+  # ── 4h. Aplica actions ──
+  if [[ "$ACTIONS_VALID" != "[]" ]]; then
+    echo "$ACTIONS_VALID" | jq -c '.[]' | while IFS= read -r ACTION; do
+      TYPE=$(jq -r '.type // ""' <<<"$ACTION")
+      case "$TYPE" in
+        handoff)
+          MOTIVO=$(jq -r '.motivo // "outro"' <<<"$ACTION")
+          URGENCIA=$(jq -r '.urgencia // "media"' <<<"$ACTION")
+          CONTEXTO=$(jq -r '.contexto_resumido // ""' <<<"$ACTION")
+          HO_RESP=$(curl -fsS --max-time 10 -X POST \
+            -H "X-Agent-Token: ${WORKER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" --arg m "$MOTIVO" --arg u "$URGENCIA" --arg c "$CONTEXTO" \
+                  '{channel:$ch, identifier:$id, motivo:$m, urgencia:$u, contexto_resumido:$c}')" \
+            "${WORKER_URL}/handoff" 2>&1)
+          log "  action handoff: motivo=$MOTIVO urgencia=$URGENCIA → ${HO_RESP:0:150}"
+          ;;
+        schedule_meeting)
+          SLOT_ISO=$(jq -r '.slot_iso // ""' <<<"$ACTION")
+          SLOT_HUMAN=$(jq -r '.slot_human // ""' <<<"$ACTION")
+          LEAD_EMAIL=$(jq -r '.lead_email // ""' <<<"$ACTION")
+          LEAD_NAME=$(jq -r '.lead_name // ""' <<<"$ACTION")
+          COMPANY=$(jq -r '.company // ""' <<<"$ACTION")
+          CTX_M=$(jq -r '.contexto // ""' <<<"$ACTION")
+          SM_RESP=$(curl -fsS --max-time 10 -X POST \
+            -H "X-Agent-Token: ${WORKER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" --arg si "$SLOT_ISO" --arg sh "$SLOT_HUMAN" \
+                  --arg e "$LEAD_EMAIL" --arg n "$LEAD_NAME" --arg co "$COMPANY" --arg ctx "$CTX_M" \
+                  '{channel:$ch, identifier:$id, slot_iso:$si, slot_human:$sh,
+                    lead_email:(if $e=="" then null else $e end),
+                    lead_name:(if $n=="" then null else $n end),
+                    company:(if $co=="" then null else $co end),
+                    contexto:(if $ctx=="" then null else $ctx end)}')" \
+            "${WORKER_URL}/meetings/schedule" 2>&1)
+          log "  action schedule_meeting: $SLOT_HUMAN → ${SM_RESP:0:150}"
+          ;;
+        suggest_slots)
+          # Sinal pra próximo turno; não tem efeito imediato porque slots já foram pré-fetchados.
+          log "  action suggest_slots (próximo turno usará)"
+          ;;
+        archive_lead)
+          MOTIVO_A=$(jq -r '.motivo // "arquivado"' <<<"$ACTION")
+          # Marcar via state patch direto
+          curl -fsS --max-time 10 -X POST \
+            -H "X-Agent-Token: ${WORKER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" --arg m "$MOTIVO_A" \
+                  '{channel:$ch, identifier:$id, patch:{temperatura:"congelado", proxima_acao:{tipo:"arquivar",motivo:$m}}}')" \
+            "${WORKER_URL}/lead-state" >/dev/null 2>&1
+          log "  action archive_lead: $MOTIVO_A"
+          ;;
+        *)
+          log "  WARN: action type desconhecido: $TYPE"
+          ;;
+      esac
+    done
+  fi
+
+  # ── 4i. Marca lida ──
   curl -fsS --max-time 10 -X POST \
     -H "X-Agent-Token: ${WORKER_TOKEN}" \
     -H "Content-Type: application/json" \
@@ -196,7 +334,6 @@ EOF
   TOTAL_COST=$(awk -v t="$TOTAL_COST" -v c="$COST" 'BEGIN { print t + c }')
   PROCESSED=$((PROCESSED+1))
 
-  # Cap por tick? Se já passou cost_cap_usd_per_tick, para.
   TICK_CAP=$(yq -r '.guardrails.cost_cap_usd_per_tick // 0.10' "$WORKSPACE/scripts/cadencia.yml")
   OVER_T=$(awk -v t="$TOTAL_COST" -v cap="$TICK_CAP" 'BEGIN { print (t >= cap) ? 1 : 0 }')
   if [[ "$OVER_T" == "1" ]]; then
@@ -205,7 +342,6 @@ EOF
   fi
 done <<< "$ITEMS"
 
-# Log final
 echo "{\"tick_id\":\"$TICK_ID\",\"cost_usd\":$TOTAL_COST,\"processed\":$PROCESSED,\"failed\":$FAILED,\"at\":\"$(date -u +%FT%TZ)\"}" >> "$COST_FILE"
 
 log "end processed=$PROCESSED failed=$FAILED total_cost=\$$TOTAL_COST"

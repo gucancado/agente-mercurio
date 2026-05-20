@@ -11,7 +11,7 @@ profiles:
     rotina: null
     list_filter:
       status: [pending, in_progress]
-    max_turns_per_workspace: 50
+    max_turns_per_workspace: 10      # MVP enxuto (era 50 — gastou demais com Sonnet em loops)
 
   daily:
     enabled: false                   # desligado no MVP — mercurio só roda responsive
@@ -49,6 +49,7 @@ profiles:
 # Atendente típico: ~$1.80/dia. Cap 2.7x = $5.00.
 # Calibrar por agente (atendente vs batch têm perfis diferentes — ver SPEC §17.4).
 guardrails:
-  cost_cap_usd_per_day: 3.00      # MVP conservador; subir após primeiro mês com dados reais
-  cost_cap_usd_per_tick: 0.30
+  cost_cap_usd_per_day: 1.00      # MVP: cap apertado depois de gastar $2 em 4 ticks; subir após validar
+  cost_cap_usd_per_tick: 0.10
   alert_threshold_pct: 80
+  claude_timeout_seconds: 90      # timeout duro de wall clock no claude --print

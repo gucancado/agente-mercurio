@@ -68,23 +68,25 @@ if [[ "$ENABLED" != "true" ]]; then
   log "perfil $PROFILE desabilitado em cadencia.yml; encerrando"
   exit 0
 fi
-MAX_TURNS=$(jq -r '.max_turns_per_workspace // 50' <<<"$PROFILE_JSON")
+MAX_TURNS=$(jq -r '.max_turns_per_workspace // 10' <<<"$PROFILE_JSON")
+CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 90' "$CADENCIA")
 
-# ── 4. Invoca Claude direto na raiz do agente ───────────────────────────
-# Claude carrega CLAUDE.md raiz, descobre projetos via skill processar-inbox.
-log "invocando claude (max-turns=$MAX_TURNS) cwd=$WORKSPACE"
-log "  ANTHROPIC_API_KEY len=${#ANTHROPIC_API_KEY}"
-log "  claude version: $(claude --version 2>&1 | head -1)"
+# Modelo: usa o do user-settings.json. Permite override por env.
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
+
+# ── 4. Invoca Claude com TIMEOUT DURO de wall clock ────────────────────
+log "invocando claude (model=$CLAUDE_MODEL max-turns=$MAX_TURNS timeout=${CLAUDE_TIMEOUT}s) cwd=$WORKSPACE"
 
 CLAUDE_LOG="${LOG_DIR}/claude.${TICK_ID}.log"
 CLAUDE_STDOUT=$(mktemp)
 CLAUDE_STDERR=$(mktemp)
 
-# Subshell + cd; sem set -e; captura exit explicitamente
+# `timeout` mata o processo após CLAUDE_TIMEOUT segundos.
+# Exit 124 = timeout hit; outros exits = comportamento normal do claude.
 (
   cd "$WORKSPACE"
-  claude --print \
-    --model claude-sonnet-4-6 \
+  timeout "${CLAUDE_TIMEOUT}s" claude --print \
+    --model "$CLAUDE_MODEL" \
     --max-turns "$MAX_TURNS" \
     --output-format json \
     --append-system-prompt "$(cat "$WORKSPACE/scripts/tick-prompt.md")" \
@@ -92,6 +94,9 @@ CLAUDE_STDERR=$(mktemp)
     > "$CLAUDE_STDOUT" 2> "$CLAUDE_STDERR"
 )
 CLAUDE_EXIT=$?
+if [[ $CLAUDE_EXIT -eq 124 ]]; then
+  log "claude TIMEOUT após ${CLAUDE_TIMEOUT}s — limit duro de wall clock"
+fi
 log "claude exit=$CLAUDE_EXIT"
 log "claude stdout size=$(wc -c < "$CLAUDE_STDOUT") bytes; stderr size=$(wc -c < "$CLAUDE_STDERR") bytes"
 
@@ -105,7 +110,14 @@ if [[ -s "$CLAUDE_STDERR" ]]; then
 fi
 # Mostra um trecho do stdout
 if [[ -s "$CLAUDE_STDOUT" ]]; then
-  head -c 1500 "$CLAUDE_STDOUT" 2>/dev/null | tr '\n' ' ' | (read -r line; log "  claude-out> ${line:0:1500}")
+  # Posta o JSON inteiro em 1 chunk se < 4000 chars; senão chunks de 2500.
+  size=$(wc -c < "$CLAUDE_STDOUT")
+  if [[ $size -lt 4000 ]]; then
+    cat "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out> $line")
+  else
+    head -c 2500 "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out[1]> $line")
+    tail -c 2500 "$CLAUDE_STDOUT" | tr '\n' ' ' | (read -r line; log "  claude-out[2]> $line")
+  fi
 fi
 
 if [[ $CLAUDE_EXIT -ne 0 ]]; then

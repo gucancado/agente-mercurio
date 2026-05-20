@@ -7,9 +7,20 @@
 #   4. Gera crontab a partir de scripts/cadencia.yml
 #   5. Exec supercronic
 
-log() { echo "[entrypoint $(date -u +%FT%TZ)] $*"; }
+log_local() { echo "[entrypoint $(date -u +%FT%TZ)] $*"; }
 
-# Em caso de erro, mantém container vivo por 10min pra log inspection via Coolify.
+# log() — escreve local E posta no worker /debug pra owner inspecionar via curl
+log() {
+  log_local "$*"
+  if [[ -n "${WORKER_URL:-}" && -n "${WORKER_TOKEN:-}" ]]; then
+    curl -fsS --max-time 5 -X POST \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg s "entrypoint" --arg t "$*" '{source: $s, text: $t}')" \
+      "${WORKER_URL}/debug" >/dev/null 2>&1 || true
+  fi
+}
+
 on_error() {
   log "FAILED at line $1 with exit $2 — sleeping 600s for inspection"
   sleep 600
@@ -21,8 +32,8 @@ set -E
 
 log "boot — AGENT_NAME=${AGENT_NAME:-unknown} EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE:-unset}"
 log "PWD=$(pwd)  USER=$(whoami)  uid=$(id -u)"
-log "/workspace contents:"
-ls -la /workspace 2>&1 | head -20 | sed 's/^/  /'
+log "/workspace listing first 20 entries:"
+ls -la /workspace 2>&1 | head -20 | while IFS= read -r line; do log_local "  $line"; done
 
 WORKSPACE=/workspace
 HOME_DIR="${HOME:-/home/agent}"

@@ -1,22 +1,57 @@
-# Dockerfile do agente. Estende gucancado/agente-base.
-# Imagem final é construída pelo CI/Coolify a partir do repositório do agente.
+# Dockerfile do agente mercurio — self-contained (inline do agente-base).
+# Quando 2º agente surgir, refatorar pra usar imagem base compartilhada
+# (ghcr.io/gucancado/agente-base — repo público, package precisa virar
+# público via UI GitHub).
 
-FROM ghcr.io/gucancado/agente-base:latest
+FROM node:24-slim
 
-# Metadados do agente (definidos via build args pelo Coolify)
-ARG AGENT_NAME=unknown
+# Utilitários do tick
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      curl \
+      ca-certificates \
+      jq \
+      tzdata \
+    && rm -rf /var/lib/apt/lists/*
+# flock e coreutils via util-linux (default no node:24-slim Debian)
+
+# yq (mikefarah, Go binary)
+RUN curl -fsSL -o /usr/local/bin/yq \
+      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
+    && chmod +x /usr/local/bin/yq
+
+# supercronic
+RUN curl -fsSL -o /usr/local/bin/supercronic \
+      "https://github.com/aptible/supercronic/releases/download/v0.2.29/supercronic-linux-amd64" \
+    && chmod +x /usr/local/bin/supercronic
+
+# Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Skills universais — Obsidian
+RUN mkdir -p /opt/skills \
+    && git clone --depth 1 https://github.com/kepano/obsidian-skills.git \
+        /opt/skills/obsidian-skills
+
+# Usuário não-root
+RUN groupadd -g 1001 agent && useradd -m -u 1001 -g 1001 -s /bin/bash agent
+
+# Metadados do agente (build args)
+ARG AGENT_NAME=mercurio
 ENV AGENT_NAME=${AGENT_NAME}
 
-# Copia repo do agente para /workspace dentro da imagem.
-# Em produção, /workspace é volume Coolify (sobrescreve esta cópia) — a cópia
-# aqui é fallback para primeira inicialização do volume.
-COPY . /workspace
+# Copia repo do agente. Em produção, /workspace é volume Coolify
+# (sobrescreve esta cópia) — esta é fallback de primeira inicialização.
+COPY --chown=agent:agent . /workspace
+WORKDIR /workspace
 
 # Permissões dos scripts
 RUN chmod +x /workspace/scripts/tick.sh \
-             /workspace/scripts/lib/*.sh \
              /workspace/_platform/mcp-bootstrap.sh \
-             /workspace/docker/entrypoint.sh
+             /workspace/docker/entrypoint.sh \
+    && find /workspace/scripts/lib -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true \
+    && chown -R agent:agent /workspace /home/agent
 
-# Entrypoint do agente sobrescreve o do base (que era genérico).
+USER agent
+
 ENTRYPOINT ["/workspace/docker/entrypoint.sh"]

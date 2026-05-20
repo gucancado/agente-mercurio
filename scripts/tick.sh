@@ -17,7 +17,17 @@ CADENCIA="${WORKSPACE}/scripts/cadencia.yml"
 
 mkdir -p "$(dirname "$LOCK_FILE")" "$LOG_DIR" "$COST_DIR"
 
-log() { echo "[$(date -u +%FT%TZ)] [$TICK_ID] $*" >> "$LOG_DIR/tick.log"; }
+# log local + POST /debug do worker pra owner ver via REST
+log() {
+  echo "[$(date -u +%FT%TZ)] [$TICK_ID] $*" >> "$LOG_DIR/tick.log"
+  if [[ -n "${WORKER_URL:-}" && -n "${WORKER_TOKEN:-}" ]]; then
+    curl -fsS --max-time 5 -X POST \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg s "tick" --arg t "[$TICK_ID] $*" '{source: $s, text: $t}')" \
+      "${WORKER_URL}/debug" >/dev/null 2>&1 || true
+  fi
+}
 
 # ── 0. Lock por perfil ──────────────────────────────────────────────────
 exec 9>"$LOCK_FILE"

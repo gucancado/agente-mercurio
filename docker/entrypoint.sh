@@ -41,18 +41,21 @@ if [[ -d /workspace ]]; then
   ls -la /workspace 2>&1 | head -16 | while IFS= read -r line; do log_local "  $line"; done
 fi
 
-# ── 0. Popula /workspace se está vazio (volume Coolify recém-criado)
-if [[ ! -f /workspace/CLAUDE.md ]]; then
-  log "/workspace vazio (sem CLAUDE.md) — copiando seed de /opt/agent/seed"
-  if [[ -d /opt/agent/seed ]]; then
-    cp -a /opt/agent/seed/. /workspace/ 2>&1 | while IFS= read -r l; do log_local "seed> $l"; done
-    log "seed copiado: top files: $(ls /workspace 2>&1 | tr '\n' ' ')"
-  else
-    log "ERRO: /opt/agent/seed não existe — não posso popular /workspace; sleep infinity"
-    sleep infinity
-  fi
+# ── 0. /workspace = checkout git do repo do agente
+# - Primeira vez (volume vazio): clone do repo público
+# - Próximas: git pull pra pegar atualizações sem rebuild
+REPO_URL="https://github.com/gucancado/agente-mercurio.git"
+if [[ ! -d /workspace/.git ]]; then
+  log "/workspace sem .git — clonando $REPO_URL"
+  cd /workspace
+  # Limpa qualquer cópia parcial antiga (do seed)
+  rm -rf /workspace/.[!.]* /workspace/* 2>/dev/null
+  git clone "$REPO_URL" /workspace 2>&1 | while IFS= read -r l; do log_local "clone> $l"; done
+  log "clone OK: $(ls /workspace | tr '\n' ' ')"
 else
-  log "/workspace já tem CLAUDE.md — pulando seed"
+  log "/workspace é git checkout — git pull"
+  cd /workspace
+  git pull --rebase --autostash 2>&1 | while IFS= read -r l; do log_local "pull> $l"; done
 fi
 
 log "/workspace/_platform/user-claude.md existe? $([[ -f /workspace/_platform/user-claude.md ]] && echo sim || echo NÃO)"

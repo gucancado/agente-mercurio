@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClassifierOutput",
+  "description": "Saída estruturada do classifier — Fase 2 do plano de ação v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent", "trigger_critico", "complexidade"],
+  "properties": {
+    "intent": {
+      "type": "string",
+      "enum": [
+        "saudacao_inicial",
+        "qualificacao_resposta",
+        "pergunta_servico",
+        "escolha_horario",
+        "confirmacao",
+        "objecao",
+        "pedido_humano",
+        "outro"
+      ],
+      "description": "Intenção da mensagem do lead."
+    },
+    "trigger_critico": {
+      "type": "string",
+      "enum": [
+        "nenhum",
+        "crise",
+        "abuso",
+        "reclamacao",
+        "lgpd",
+        "fechamento"
+      ],
+      "description": "Trigger crítico que exige handoff imediato pro humano. 'nenhum' quando segue fluxo normal."
+    },
+    "complexidade": {
+      "type": "string",
+      "enum": ["trivial", "normal", "alta"],
+      "description": "Complexidade esperada da resposta. Trivial = saudação/confirmação curta. Alta = nuance, ambiguidade, recuperação."
+    },
+    "fatos_novos": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Fatos sobre o lead que esta mensagem revelou. Apenas campos com valor; omita os ausentes.",
+      "properties": {
+        "nome": { "type": "string" },
+        "empresa": { "type": "string" },
+        "email": { "type": "string" },
+        "nicho": { "type": "string", "description": "Segmento do negócio do lead — ex: 'clínica médica', 'e-commerce moda', 'SaaS B2B'." },
+        "investimento_mes_brl": {
+          "type": "number",
+          "description": "Investimento mensal declarado em mídia paga, em BRL. Use número, não faixa."
+        }
+      }
+    },
+    "atualizacao_bant": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Atualização das dimensões BANT. Omita as que não mudaram nesta mensagem.",
+      "properties": {
+        "B": { "type": "string", "enum": ["ok", "fraco"] },
+        "A": { "type": "string", "enum": ["ok", "fraco"] },
+        "N": { "type": "string", "enum": ["ok", "fraco"] },
+        "T": { "type": "string", "enum": ["ok", "fraco"] }
+      }
+    }
+  }
+}

@@ -72,9 +72,10 @@ if [[ "$COUNT" == "0" ]]; then
 fi
 
 # ── 3. Configs ─────────────────────────────────────────────────────────
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
+DEFAULT_MODEL="${CLAUDE_MODEL:-claude-haiku-4-5}"
 CLAUDE_TIMEOUT=$(yq -r '.guardrails.claude_timeout_seconds // 90' "$WORKSPACE/scripts/cadencia.yml")
 PLAYBOOK_PATH="$WORKSPACE/_base/playbook-sdr.md"
+LLM_ADAPTER="$WORKSPACE/scripts/llm-call.js"
 
 # ── 4. Loop FIFO ────────────────────────────────────────────────────────
 ITEMS=$(jq -c '[.messages[]] | reverse | .[]' <<<"$INBOX_JSON")
@@ -127,6 +128,15 @@ while IFS= read -r ITEM; do
 
   PROJECT_BRIEF=$(cat "$PROJECT_DIR/PROJECT.md" 2>/dev/null || echo "(briefing ausente)")
   PLAYBOOK=$(cat "$PLAYBOOK_PATH" 2>/dev/null || echo "(playbook ausente)")
+
+  # Modelo por projeto: lê projetos/<slug>/MODEL (1 linha). Fallback pro default.
+  if [[ -f "$PROJECT_DIR/MODEL" ]]; then
+    PROJECT_MODEL=$(head -1 "$PROJECT_DIR/MODEL" | tr -d ' \t\r\n')
+  else
+    PROJECT_MODEL=""
+  fi
+  MODEL="${PROJECT_MODEL:-$DEFAULT_MODEL}"
+  log "  modelo: $MODEL"
 
   # ── 4a. Lê lead_state ──
   STATE_RESP=$(curl -fsS --max-time 10 \
@@ -219,34 +229,32 @@ INSTRUÇÕES FINAIS (LEIA CADA UMA E APLIQUE):
 EOF
 )
 
-  # ── 4d. Invoca Claude ──
-  CLAUDE_STDOUT=$(mktemp)
-  CLAUDE_STDERR=$(mktemp)
+  # ── 4d. Invoca LLM via adapter (Claude ou Gemini) ──
+  LLM_STDOUT=$(mktemp)
+  LLM_STDERR=$(mktemp)
   (
     cd "$WORKSPACE"
-    timeout "${CLAUDE_TIMEOUT}s" claude --print \
-      --model "$CLAUDE_MODEL" \
+    timeout "${CLAUDE_TIMEOUT}s" node "$LLM_ADAPTER" \
+      --model "$MODEL" \
       --max-turns 3 \
-      --output-format json \
-      --setting-sources project \
       <<<"$PROMPT" \
-      > "$CLAUDE_STDOUT" 2> "$CLAUDE_STDERR"
+      > "$LLM_STDOUT" 2> "$LLM_STDERR"
   )
   CEXIT=$?
 
   if [[ $CEXIT -ne 0 ]]; then
-    log "  claude exit=$CEXIT — não envia, não marca"
-    head -c 800 "$CLAUDE_STDERR" 2>/dev/null | tr '\n' ' ' | (read -r l; log "    err: ${l:0:500}")
-    rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
+    log "  llm-call exit=$CEXIT model=$MODEL — não envia, não marca"
+    head -c 800 "$LLM_STDERR" 2>/dev/null | tr '\n' ' ' | (read -r l; log "    err: ${l:0:500}")
+    rm -f "$LLM_STDOUT" "$LLM_STDERR"
     FAILED=$((FAILED+1))
     continue
   fi
 
-  RESPONSE=$(jq -r '.result // empty' "$CLAUDE_STDOUT")
-  COST=$(jq -r '.total_cost_usd // 0' "$CLAUDE_STDOUT")
-  TURNS=$(jq -r '.num_turns // 0' "$CLAUDE_STDOUT")
+  RESPONSE=$(jq -r '.result // empty' "$LLM_STDOUT")
+  COST=$(jq -r '.total_cost_usd // 0' "$LLM_STDOUT")
+  TURNS=$(jq -r '.num_turns // 0' "$LLM_STDOUT")
 
-  rm -f "$CLAUDE_STDOUT" "$CLAUDE_STDERR"
+  rm -f "$LLM_STDOUT" "$LLM_STDERR"
 
   if [[ -z "$RESPONSE" ]]; then
     log "  claude retornou response vazia — pulando"

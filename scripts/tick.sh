@@ -211,6 +211,8 @@ INSTRUÇÕES FINAIS (LEIA CADA UMA E APLIQUE):
 
 4. PROPOR REUNIÃO: Se state.qualificacao tem 3+ dimensões em "ok"/"fraco" (não-desconhecido), pare de qualificar — proponha reunião com slots do <context_slots> AGORA.
 
+4a. NÃO RE-AGENDAR: Se state.tags contém "reuniao_agendada"/"reuniao_confirmada" OU state.proxima_acao.tipo está em {reuniao_agendada, reuniao_confirmada, reuniao_marcada}, NÃO emita schedule_meeting de novo. A reunião já existe. Responda apenas confirmando ("Reunião segue marcada para X"), ou se o lead pediu remarcar, use reschedule_meeting. Mensagens como "obrigado", "valeu", "ok" depois de reunião agendada → apenas reply curto de cortesia (sem action).
+
 5. NÃO REPITA reconhecimento que já está refletido em tags/fatos_coletados (ex: tag "healthcare" já existe → não dizer "clínica é nicho interessante" de novo).
 
 6. state_patch faz merge top-level — envie só campos que mudaram. actions=[] quando só responde.

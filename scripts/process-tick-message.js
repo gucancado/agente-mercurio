@@ -27,6 +27,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { complete } = require('./llm-adapter');
+const { loadSkillsForIntent } = require('./skills-loader');
 
 const WORKSPACE = '/workspace';
 const CLASSIFIER_SCHEMA = JSON.parse(
@@ -128,35 +129,6 @@ function buildClassifierRequest({ leadMessage, leadState, model }) {
   };
 }
 
-const RESPONDER_FORMAT_INSTRUCTIONS = `
-INSTRUÇÕES FINAIS (LEIA E APLIQUE):
-
-1. SAUDAÇÃO E DISCLOSURE: Use a tag <is_first_message>. Se "true", inclua "Oi <nome>! Sou a Mel, agente automatizada da BeeAds — operada por humanos." na primeira frase. Se "false", NÃO comece com "Oi <nome>", NÃO repita o disclosure, NÃO se apresente — vá direto ao conteúdo.
-
-2. TOM (registro corporativo profissional, NÃO oral):
-   PROIBIDO: "a gente" → "nós"/"somos"; "tá" → "está"; "pra" → "para"; "beleza" → "certo"/"perfeito"; "rola" → "é interessante"/"trabalhamos bastante"; "show" → "ótimo"; "tranquilo" → "sem problema"; "viu?"/"tá?" no final → omitir.
-
-3. FORMATO DE SAÍDA — EXATO:
-<reply>
-[texto que vai literal pro WhatsApp do lead — sem prefixo, sem aspas externas, 3-4 linhas máx]
-</reply>
-<actions>
-[]
-</actions>
-
-   Em <actions> emita 0..N itens. Tipos válidos:
-   - {"type":"handoff","motivo":"...","urgencia":"alta|media|baixa","contexto_resumido":"..."}
-   - {"type":"schedule_meeting","slot_iso":"ISO datetime","slot_human":"quarta (22/05) às 10h","lead_email":"...","lead_name":"...","company":"...","contexto":"..."}
-   - {"type":"reschedule_meeting","meeting_id":N,"slot_iso":"...","slot_human":"..."}
-   - {"type":"archive_lead","motivo":"..."}
-
-4. NÃO emita <state_patch>. O estado é gerenciado por código — não tente atualizar BANT ou fatos no XML.
-
-5. PROPOR REUNIÃO: se a tag <classification> indica complexidade≠trivial E o estado tem 3+ dimensões BANT em ok/fraco, proponha reunião com os slots em <context_slots>. Não cavar a dimensão faltante.
-
-6. NÃO RE-AGENDAR: se state.tags inclui "reuniao_agendada"/"reuniao_confirmada" OU proxima_acao.tipo é "reuniao_agendada", NÃO emita schedule_meeting. Responda só com cortesia.
-`;
-
 function buildResponderRequest({
   leadMessage,
   leadState,
@@ -164,7 +136,7 @@ function buildResponderRequest({
   contextSlots,
   isFirstMessage,
   projectBrief,
-  playbook,
+  skillsText,
   leadInfo,
   model,
 }) {
@@ -172,12 +144,12 @@ function buildResponderRequest({
   const identity = `Você é a Mel, SDR da BeeAds (agência de marketing digital).
 Responde mensagens de WhatsApp de prospects interessados em tráfego pago.
 Sua função: qualificar leads via BANT e agendar reuniões com o time comercial.
-Nunca exponha nome próprio do diretor — refira-se sempre como "o time comercial" ou "nosso time".`;
+Nunca exponha nome próprio do diretor — refira-se sempre como "o time comercial" ou "nosso time".
 
-  // Skills (Fase 2: playbook inteiro como segundo bloco cacheável; Fase 3 vai modularizar)
-  const skills = playbook;
+Cada chamada carrega um subset de skills relevantes ao intent classificado.
+Siga as regras das skills carregadas. Em caso de conflito: ética/LGPD vence outras.`;
 
-  // Contexto dinâmico
+  // Contexto dinâmico (NÃO cacheado)
   const contextoBlocks = [
     `<is_first_message>${isFirstMessage}</is_first_message>`,
     `<lead_state>\n${JSON.stringify(leadState, null, 2)}\n</lead_state>`,
@@ -186,7 +158,7 @@ Nunca exponha nome próprio do diretor — refira-se sempre como "o time comerci
     `<lead_info>\n${JSON.stringify(leadInfo)}\n</lead_info>`,
     `<project_brief>\n${projectBrief}\n</project_brief>`,
     `<lead_message>\n${leadMessage}\n</lead_message>`,
-    RESPONDER_FORMAT_INSTRUCTIONS,
+    `\nResponda no formato definido na skill formato-saida.`,
   ];
 
   return {
@@ -195,8 +167,8 @@ Nunca exponha nome próprio do diretor — refira-se sempre como "o time comerci
     maxTokens: 2048,
     temperature: 0.6,
     system: [
-      { text: identity, cache: true },     // breakpoint #1
-      { text: skills, cache: true },        // breakpoint #2
+      { text: identity, cache: true },        // breakpoint #1 (sempre cacheado)
+      { text: skillsText, cache: true },      // breakpoint #2 (cacheado por combinação de skills)
     ],
     messages: [
       { role: 'user', content: contextoBlocks.join('\n\n') },
@@ -297,7 +269,6 @@ async function main() {
     process.exit(3);
   }
   const projectBrief = fs.readFileSync(path.join(projectDir, 'PROJECT.md'), 'utf8');
-  const playbook = fs.readFileSync(path.join(WORKSPACE, '_base/playbook-sdr.md'), 'utf8');
 
   // ── 1. Lê lead_state ──
   const stateResp = await workerGet(
@@ -406,9 +377,16 @@ async function main() {
   // Tier routing entra na Fase 4. Por ora: tudo respond_medium (Haiku).
   const tier = 'medio';
   const responderModel = pickResponderModel(projectDir, tier);
+
+  // Skills modulares (Fase 3): carrega só as relevantes ao intent classificado.
+  // Ordem alfabética → cache key estável → cache hit em chamadas com mesma
+  // combinação de skills.
+  const { names: skillsLoaded, text: skillsText } = loadSkillsForIntent(classification.intent);
+  await postDebug(`[${inboxId}] skills: ${skillsLoaded.join(', ')}`);
+
   const respReq = buildResponderRequest({
     leadMessage: text, leadState, classification, contextSlots,
-    isFirstMessage, projectBrief, playbook,
+    isFirstMessage, projectBrief, skillsText,
     leadInfo: { identifier, push_name: pushName, channel },
     model: responderModel,
   });

@@ -79,14 +79,23 @@ async function evolutionSendText(instance, number, text) {
 
 // ── Model config (Fase 2: tudo Haiku; tier routing entra na Fase 4) ─────
 
-function pickClassifierModel(projectDir) {
+function pickClassifierModel(_projectDir) {
   // Pode ser sobrescrito futuramente via projetos/<slug>/llm-config.yml
   return 'claude-haiku-4-5';
 }
 
-function pickResponderModel(projectDir, _tier) {
-  // Tier ignorado na Fase 2 — sempre Haiku. Sonnet entra na Fase 4 pro tier_alto.
-  // Override por projeto: lê arquivo MODEL legado se existir (compat).
+// Mapping default tier → modelo. Override por projeto via llm-config.yml
+// (não implementado ainda — entra com config-driven na evolução pós-v1).
+const TIER_TO_MODEL = {
+  baixo:  'claude-haiku-4-5',
+  medio:  'claude-haiku-4-5',
+  alto:   'claude-sonnet-4-6',
+};
+
+function pickResponderModel(projectDir, tier) {
+  // Override legado: arquivo MODEL na pasta do projeto (1 linha, força modelo
+  // único pra TODOS os tiers — útil pra testes A/B simples). Quando existir,
+  // ignora o tier routing.
   try {
     const modelFile = path.join(projectDir, 'MODEL');
     if (fs.existsSync(modelFile)) {
@@ -94,7 +103,40 @@ function pickResponderModel(projectDir, _tier) {
       if (m) return m;
     }
   } catch {}
-  return 'claude-haiku-4-5';
+  return TIER_TO_MODEL[tier] || 'claude-haiku-4-5';
+}
+
+/**
+ * Tier routing — decide qual tier de modelo usar com base na classificação
+ * e no estado do lead. Roda em código, sem custo LLM.
+ *
+ * Regras (Fase 4):
+ *   - intent saudacao_inicial/escolha_horario/confirmacao → tier_baixo (Haiku)
+ *   - intent objecao OU complexidade alta → tier_alto (Sonnet)
+ *   - tentativas_followup >= 2 → tier_alto (lead difícil, vale modelo melhor)
+ *   - default → tier_medio (Haiku)
+ *
+ * Triggers críticos e pedido_humano já curto-circuitam ANTES desta função
+ * (handoff), então não tratam aqui.
+ */
+function escolherTier(classification, leadState) {
+  const intent = classification.intent;
+  const complexidade = classification.complexidade;
+  const tentativasFollowup = leadState?.tentativas_followup || 0;
+
+  if (intent === 'saudacao_inicial' || intent === 'escolha_horario' || intent === 'confirmacao') {
+    return 'baixo';
+  }
+  if (intent === 'objecao') {
+    return 'alto';
+  }
+  if (complexidade === 'alta') {
+    return 'alto';
+  }
+  if (tentativasFollowup >= 2) {
+    return 'alto';
+  }
+  return 'medio';
 }
 
 // ── Prompt builders ─────────────────────────────────────────────────────
@@ -139,6 +181,7 @@ function buildResponderRequest({
   skillsText,
   leadInfo,
   model,
+  tier,
 }) {
   // Identidade — pequena, máximo cacheável
   const identity = `Você é a Mel, SDR da BeeAds (agência de marketing digital).
@@ -162,7 +205,7 @@ Siga as regras das skills carregadas. Em caso de conflito: ética/LGPD vence out
   ];
 
   return {
-    task: 'respond_medium',
+    task: `respond_${tier}`,
     model,
     maxTokens: 2048,
     temperature: 0.6,
@@ -374,9 +417,9 @@ async function main() {
   }
 
   // ── 6. Responder ──
-  // Tier routing entra na Fase 4. Por ora: tudo respond_medium (Haiku).
-  const tier = 'medio';
+  const tier = escolherTier(classification, leadState);
   const responderModel = pickResponderModel(projectDir, tier);
+  await postDebug(`[${inboxId}] tier routing: ${tier} → model=${responderModel}`);
 
   // Skills modulares (Fase 3): carrega só as relevantes ao intent classificado.
   // Ordem alfabética → cache key estável → cache hit em chamadas com mesma
@@ -389,6 +432,7 @@ async function main() {
     isFirstMessage, projectBrief, skillsText,
     leadInfo: { identifier, push_name: pushName, channel },
     model: responderModel,
+    tier,
   });
   const respResp = await complete(respReq);
   const responderText = respResp.result;
@@ -425,7 +469,7 @@ async function main() {
   });
   await workerPost('/llm-metrics', {
     message_id: parseInt(msgOut.id, 10),
-    task: 'respond_medium',
+    task: `respond_${tier}`,
     provider: respResp.provider, model: respResp.model, tier,
     tokens_in: respResp.tokens_in, tokens_out: respResp.tokens_out,
     cache_read_tokens: respResp.cache_read_tokens,

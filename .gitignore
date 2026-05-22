@@ -23,3 +23,7 @@ dist/
 .vscode/
 .idea/
 *.swp
+
+# Eval results (auto-generated, ruidoso no git)
+tests/eval/results/
+tests/eval/fixtures/

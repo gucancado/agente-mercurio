@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-05-22T00:44:20.062Z",
+  "sample_size": 8,
+  "summary": {
+    "total": 8,
+    "quality": {
+      "anti_padroes_total": 0,
+      "anti_padroes_pct": "0.0%",
+      "saudacao_repetida_count": 3,
+      "saudacao_repetida_pct": "37.5%",
+      "disclosure_repetido_count": 3,
+      "disclosure_repetido_pct": "37.5%",
+      "muito_longo_count": 0,
+      "muito_longo_pct": "0.0%"
+    },
+    "cost": {
+      "total_usd": 0.0858,
+      "avg_usd": 0.010721
+    },
+    "latency_ms": {
+      "avg": 2189,
+      "p95": 4593
+    },
+    "distribution_tier": {
+      "medio": 6,
+      "baixo": 1,
+      "alto": 1
+    },
+    "distribution_intent": {
+      "saudacao_inicial": 4,
+      "pergunta_servico": 2,
+      "objecao": 2
+    }
+  },
+  "issues": [
+    {
+      "message_id": "9",
+      "direction": "outbound",
+      "tier": "medio",
+      "classifier_intent": "saudacao_inicial",
+      "cost_usd": "0.011017",
+      "latency_ms": 2018,
+      "is_first_outbound": false,
+      "text_preview": "Oi, Gustavo! Sou a Mel, agente automatizada da BeeAds — operada por humanos. Em ",
+      "checks": {
+        "anti_padroes_count": 0,
+        "anti_padroes_hits": [],
+        "saudacao_repetida": true,
+        "disclosure_repetido": true,
+        "muito_longo": false,
+        "lines": 1
+      }
+    },
+    {
+      "message_id": "11",
+      "direction": "outbound",
+      "tier": "medio",
+      "classifier_intent": "pergunta_servico",
+      "cost_usd": "0.004372",
+      "latency_ms": 2864,
+      "is_first_outbound": false,
+      "text_preview": "Oi, Gustavo! Sou a Mel, agente automatizada da BeeAds — operada por humanos.\n\nNa",
+      "checks": {
+        "anti_padroes_count": 0,
+        "anti_padroes_hits": [],
+        "saudacao_repetida": true,
+        "disclosure_repetido": true,
+        "muito_longo": false,
+        "lines": 3
+      }
+    },
+    {
+      "message_id": "19",
+      "direction": "outbound",
+      "tier": "baixo",
+      "classifier_intent": "saudacao_inicial",
+      "cost_usd": "0.006263",
+      "latency_ms": 1295,
+      "is_first_outbound": false,
+      "text_preview": "Oi, Gustavo! Sou a Mel, agente automatizada da BeeAds — operada por humanos. Pos",
+      "checks": {
+        "anti_padroes_count": 0,
+        "anti_padroes_hits": [],
+        "saudacao_repetida": true,
+        "disclosure_repetido": true,
+        "muito_longo": false,
+        "lines": 1
+      }
+    }
+  ]
+}

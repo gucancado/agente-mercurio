@@ -1,0 +1,14 @@
+{
+  "name": "agente-mercurio",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Mercurio — agente SDR multi-projeto da plataforma Semente",
+  "scripts": {
+    "eval:extract": "node tests/eval/extract-fixtures.js",
+    "eval:offline": "node tests/eval/run-offline-eval.js",
+    "eval:baseline": "node tests/eval/run-offline-eval.js --save-baseline"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -391,7 +391,10 @@ async function main() {
       urgencia: motivo === 'crise' || motivo === 'abuso' ? 'alta' : 'media',
       contexto_resumido: `Trigger=${classification.trigger_critico} intent=${classification.intent}. Mensagem: ${text.slice(0, 200)}`,
     });
-    await workerPost('/inbox-debug/mark-read', { id: inboxId, processed_by: 'process-tick' });
+    await workerPost('/inbox-debug/mark-read', {
+      id: parseInt(inboxId, 10),
+      processed_by: 'process-tick',
+    });
     console.log(JSON.stringify({
       ok: true, handoff: true, classifier_intent: classification.intent,
       cost_usd_total: classifierMetric.cost_usd, reply_preview: replyText.slice(0, 80),
@@ -479,7 +482,10 @@ async function main() {
   }
 
   // ── 11. Marca inbox como processado ──
-  await workerPost('/inbox-debug/mark-read', { id: inboxId, processed_by: 'process-tick' });
+  await workerPost('/inbox-debug/mark-read', {
+    id: parseInt(inboxId, 10),
+    processed_by: 'process-tick',
+  });
 
   console.log(JSON.stringify({
     ok: true,

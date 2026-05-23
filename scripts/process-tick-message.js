@@ -454,6 +454,17 @@ async function main() {
   }
 
   // ── 7. Envia via Evolution ──
+  // Delay randômico anti-detecção do WhatsApp (Baileys = unofficial).
+  // Configurável via env vars; default = OFF (delay zero) pra não atrapalhar
+  // testes. Em "produção real" recomendado: MIN=3000 MAX=15000 (3-15s).
+  const delayMinMs = parseInt(process.env.RESPONSE_DELAY_MIN_MS || '0', 10);
+  const delayMaxMs = parseInt(process.env.RESPONSE_DELAY_MAX_MS || '0', 10);
+  if (delayMaxMs > delayMinMs && delayMaxMs > 0) {
+    const delay = delayMinMs + Math.floor(Math.random() * (delayMaxMs - delayMinMs));
+    await postDebug(`[${inboxId}] delay anti-detecção: ${delay}ms`);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+
   let evoSendId = null;
   try {
     const sendResp = await evolutionSendText(instance, identifier.replace(/^\+/, ''), reply);

@@ -41,9 +41,27 @@ const WORKER_TOKEN = process.env.WORKER_TOKEN;
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
-if (!WORKER_URL || !WORKER_TOKEN || !EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-  console.error('env faltando: WORKER_URL / WORKER_TOKEN / EVOLUTION_API_URL / EVOLUTION_API_KEY');
+// Mapeamento de canal por projeto. Define qual transport usar pra cada projeto.
+// JSON no formato:
+//   {
+//     "metido-a-gente": { "provider": "cloud", "phone_number_id": "1152130677980438" },
+//     "outro-projeto": { "provider": "evolution", "instance": "mercurio-outro-projeto" }
+//   }
+// Default (não listado): provider=evolution, instance=`<agent>-<slug>` (vem do inbox.instance).
+let CHANNEL_PROVIDERS = {};
+try {
+  CHANNEL_PROVIDERS = JSON.parse(process.env.CHANNEL_PROVIDERS_JSON || '{}');
+} catch (e) {
+  console.error('CHANNEL_PROVIDERS_JSON inválido:', e.message);
+}
+
+if (!WORKER_URL || !WORKER_TOKEN) {
+  console.error('env faltando: WORKER_URL / WORKER_TOKEN');
   process.exit(2);
+}
+// Evolution credentials são opcionais agora (só necessárias se algum projeto usa provider=evolution)
+if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
+  console.warn('AVISO: EVOLUTION_API_URL/EVOLUTION_API_KEY não setadas. Projetos que usam provider=evolution vão falhar.');
 }
 
 // ── REST helpers ────────────────────────────────────────────────────────
@@ -75,6 +93,45 @@ async function evolutionSendText(instance, number, text) {
   });
   if (!r.ok) throw new Error(`evolution sendText HTTP ${r.status}`);
   return r.json();
+}
+
+async function cloudSendText(phoneNumberId, to, text) {
+  const url = `${WORKER_URL}/send-cloud`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'X-Agent-Token': WORKER_TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify({ phone_number_id: phoneNumberId, to: to.replace(/^\+/, ''), text }),
+  });
+  if (!r.ok) {
+    const body = await r.text();
+    throw new Error(`worker POST /send-cloud HTTP ${r.status} body=${body.slice(0, 200)}`);
+  }
+  return r.json();
+}
+
+/**
+ * Envia mensagem WhatsApp pelo canal configurado pro projeto.
+ * Retorna { send_id?: string } no padrão.
+ *
+ * @param {object} ctx — { projectSlug, instance, identifier, text }
+ */
+async function channelSendText(ctx) {
+  const { projectSlug, instance, identifier, text } = ctx;
+  const cfg = CHANNEL_PROVIDERS[projectSlug] || { provider: 'evolution', instance };
+  const provider = cfg.provider || 'evolution';
+
+  if (provider === 'cloud') {
+    if (!cfg.phone_number_id) {
+      throw new Error(`channel cloud sem phone_number_id pra projeto ${projectSlug}`);
+    }
+    const resp = await cloudSendText(cfg.phone_number_id, identifier, text);
+    return { send_id: resp?.send_id ?? null, provider: 'cloud' };
+  }
+
+  // default: evolution
+  const evoInstance = cfg.instance || instance;
+  const resp = await evolutionSendText(evoInstance, identifier.replace(/^\+/, ''), text);
+  return { send_id: resp?.key?.id ?? null, provider: 'evolution' };
 }
 
 // ── Model config (Fase 2: tudo Haiku; tier routing entra na Fase 4) ─────
@@ -330,7 +387,7 @@ async function main() {
   if (!item.message_text || item.message_text.trim() === '') {
     const askText = 'Não consegui ler sua última mensagem (pode ter chegado em formato não suportado). Pode reenviar como texto, por favor?';
     try {
-      await evolutionSendText(instance, identifier.replace(/^\+/, ''), askText);
+      await channelSendText({ projectSlug, instance, identifier, text: askText });
       await workerPost('/messages', {
         channel, identifier, direction: 'outbound', text: askText,
         tier: 'baixo', classifier_intent: 'sem_texto',
@@ -431,7 +488,7 @@ async function main() {
       ? 'Ótimo! Para isso já te conecto com o time comercial. Te chamam aqui ainda hoje.'
       : 'Para te atender melhor nisso, vou chamar alguém do time aqui. Te respondem ainda hoje, está bem? 👍';
 
-    await evolutionSendText(instance, identifier.replace(/^\+/, ''), replyText);
+    await channelSendText({ projectSlug, instance, identifier, text: replyText });
     const msgRow = await workerPost('/messages', {
       project: projectSlug,
       channel, identifier, direction: 'outbound', text: replyText,
@@ -498,13 +555,16 @@ async function main() {
   }
 
   let evoSendId = null;
+  let sendProvider = 'unknown';
   try {
-    const sendResp = await evolutionSendText(instance, identifier.replace(/^\+/, ''), reply);
-    evoSendId = sendResp?.key?.id || null;
+    const sendResp = await channelSendText({ projectSlug, instance, identifier, text: reply });
+    evoSendId = sendResp?.send_id || null;
+    sendProvider = sendResp?.provider || 'unknown';
   } catch (err) {
     await postDebug(`[${inboxId}] sendText FALHOU: ${err.message.slice(0, 200)}`);
     process.exit(6);
   }
+  await postDebug(`[${inboxId}] enviado via ${sendProvider} send_id=${evoSendId ?? '(null)'}`);
 
   // ── 8. INSERT messages (outbound) + llm_metrics do responder ──
   const totalCost = classifierMetric.cost_usd + respResp.cost_usd;

@@ -29,7 +29,7 @@ Perfis ativos: `responsive` (5min comercial / 30min fora; processa inbox a cada 
 | Instância Evolution | `mercurio-metido-a-gente` |
 | Instance UUID | `3fb4de6a-57bf-469d-9af4-5600c556b1bf` |
 | Instance hash | `03512C7D-F379-460C-BADD-F0D387574E72` |
-| Número WhatsApp | +55 31 9778-6735 (temporário) |
+| Número WhatsApp | +55 31 97254-1177 (atualizado 2026-05-22; anterior +55 31 9778-6735) |
 | Conta Google | n/a (sem email/Drive nessa persona) |
 | Workspace Bloquim | n/a (Bloquim sync desligado no MVP) |
 | Provisionada em | 2026-05-20 |

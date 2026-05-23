@@ -402,6 +402,7 @@ async function main() {
 
     await evolutionSendText(instance, identifier.replace(/^\+/, ''), replyText);
     const msgRow = await workerPost('/messages', {
+      project: projectSlug,
       channel, identifier, direction: 'outbound', text: replyText,
       tier: 'handoff', classifier_intent: classification.intent,
     });
@@ -477,6 +478,7 @@ async function main() {
   // ── 8. INSERT messages (outbound) + llm_metrics do responder ──
   const totalCost = classifierMetric.cost_usd + respResp.cost_usd;
   const msgOut = await workerPost('/messages', {
+    project: projectSlug,
     channel, identifier, direction: 'outbound', text: reply,
     evolution_send_id: evoSendId,
     tier, model: respResp.model, provider: respResp.provider,

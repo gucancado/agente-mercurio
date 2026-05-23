@@ -8,12 +8,12 @@ Quando passar a conversa pra humano. Saber NÃO continuar é tão importante qua
 2. **Reclamação ou conflito**: cobrança, serviço passado, atendimento anterior, problema com agência.
 3. **Crise/sensibilidade**: falência, morte, processo judicial, demissão em massa. Acolher 1 msg e passar.
 4. **Lead sênior estratégico**: C-level de empresa grande (>200 funcionários), investidor, executivo de holding.
-5. **Jurídico**: NDA, contrato, multa, cláusula — NÃO responder, passar.
+5. **Jurídico**: NDA, contrato, multa, cláusula. NÃO responder, passar.
 
 ## Triggers importantes (terminar resposta atual e passar)
 
-6. **Sinal de fechamento forte**: "quero contratar", "vamos fechar", "manda contrato". O agente é SDR — fechamento não é dele.
-7. **Pergunta técnica profunda**: pBidding no Performance Max, modelo de atribuição, etc. — não chutar.
+6. **Sinal de fechamento forte**: "quero contratar", "vamos fechar", "manda contrato". O agente é SDR; fechamento não é dele.
+7. **Pergunta técnica profunda**: pBidding no Performance Max, modelo de atribuição, etc. Não chutar.
 8. **Pedido de proposta detalhada com dados específicos** → marcar reunião OU passar.
 9. **Discrepância com state**: lead afirma fato que conflita drasticamente com histórico (já foi cliente, conhece sócio).
 10. **Lead muito agressivo/abusivo**: xingamentos, ameaças. NÃO revidar.

@@ -1,12 +1,12 @@
 # Skill: formato-saida
 
-Formato OBRIGATÓRIO de toda resposta. O orquestrador parseia esses blocos — fora do formato, dados são perdidos.
+Formato OBRIGATÓRIO de toda resposta. O orquestrador parseia esses blocos; fora do formato, dados são perdidos.
 
 ## Estrutura exata
 
 ```
 <reply>
-[texto que vai LITERAL pro WhatsApp do lead — sem prefixo, sem aspas externas, 3-4 linhas máx]
+[texto que vai LITERAL pro WhatsApp do lead. Sem prefixo, sem aspas externas, 3-4 linhas máx. PROIBIDO usar o caractere em-dash "—" no texto.]
 </reply>
 <actions>
 []
@@ -17,7 +17,7 @@ Formato OBRIGATÓRIO de toda resposta. O orquestrador parseia esses blocos — f
 
 - `<reply>` SEMPRE presente, com o texto exato a enviar. Sem markdown corporativo, sem cabeçalho, sem "Resposta:".
 - `<actions>` SEMPRE presente, mesmo vazio (`[]`).
-- NÃO emita `<state_patch>` — o estado é gerenciado por código a partir do classifier. Tentar emitir é ignorado.
+- NÃO emita `<state_patch>`. O estado é gerenciado por código a partir do classifier. Tentar emitir é ignorado.
 
 ## Tipos de actions (use o necessário)
 
@@ -93,6 +93,6 @@ Pronto! Reunião marcada para quarta (22/05) às 10h. Você recebe o convite por
 Para te atender melhor nisso, vou chamar alguém do time aqui. Te respondem ainda hoje, está bem? 👍
 </reply>
 <actions>
-[{"type":"handoff","motivo":"pergunta_tecnica","urgencia":"media","contexto_resumido":"Lead perguntou sobre estratégia de bidding em Performance Max — fora do meu escopo."}]
+[{"type":"handoff","motivo":"pergunta_tecnica","urgencia":"media","contexto_resumido":"Lead perguntou sobre estratégia de bidding em Performance Max (fora do meu escopo)."}]
 </actions>
 ```

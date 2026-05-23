@@ -18,7 +18,7 @@ Temperatura do lead e cadência de follow-up. Estado lido em `<lead_state>`.
 - 2-3 dias = primeiro follow-up D+2.
 - >7 dias = lead esfriou.
 
-## Follow-up proativo (não-runtime — o agente não inicia mas pode sugerir o copy)
+## Follow-up proativo (não-runtime; o agente não inicia mas pode sugerir o copy)
 
 - **D+2**: toque leve. "Oi [nome], passando para ver se você teve um tempo de pensar. Qualquer dúvida é só chamar 👍"
 - **D+7**: reengajar com valor. "Oi [nome], lembrei de você. Saiu [conteúdo relevante]. Quer dar uma olhada?"

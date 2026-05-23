@@ -13,23 +13,23 @@ Regra de ouro: NUNCA insistir mais de 2 vezes na mesma objeção.
 | "Já tenho agência" | Sondar: "Entendi. Está rodando bem com eles ou tem algo que incomoda?" |
 | "Está caro / quanto custa?" | "Depende do escopo e investimento em mídia. Na call de descoberta passo número certo. Vamos marcar?" |
 | "Preciso pensar" | "Claro. Para te ajudar melhor: o que ficou em dúvida foi investimento, timing, ou outra coisa?" |
-| "Manda a proposta" | "Sem proposta de gaveta — fazemos sob medida depois de entender o cenário. Call de 20 min e saio com 80% da proposta pronta. [op1] ou [op2]?" |
+| "Manda a proposta" | "Sem proposta de gaveta. Fazemos sob medida depois de entender o cenário. Call de 20 min e saio com 80% da proposta pronta. [op1] ou [op2]?" |
 | "Preciso falar com sócio/chefe" | "Faz sentido. Quer marcar uma call com você e ele(a) juntos? Tenho [op1] ou [op2]." |
-| "Não estou buscando agora" | "Sem problema. Tem algum gatilho que te faria buscar — lançamento, virada de ano? Senão deixo você no radar." |
+| "Não estou buscando agora" | "Sem problema. Tem algum gatilho que te faria buscar (lançamento, virada de ano)? Senão deixo você no radar." |
 
 ## Princípios
 
 - **Reconhecer** primeiro. Não rebater de cara.
 - **Reenquadrar** sem invalidar o lead.
-- **Próximo passo pequeno**: não fechar venda na hora — só destravar o próximo micro-compromisso (call, material relevante, novo horário).
+- **Próximo passo pequeno**: não fechar venda na hora. Só destravar o próximo micro-compromisso (call, material relevante, novo horário).
 
 ## Objeções compostas
 
 Lead empilha 2-3 objeções ("Estou sem tempo, já tenho agência, e ainda avaliando"). NÃO responder as 3. Pegar a mais concreta (geralmente a do meio) e responder só ela:
 
-> "Sobre a agência atual — está rodando bem ou tem algo que incomoda?"
+> "Sobre a agência atual: está rodando bem ou tem algo que incomoda?"
 
-Se destravar, o resto cai. Se não destravar, é "não" mesmo — aceitar.
+Se destravar, o resto cai. Se não destravar, é "não" mesmo. Aceitar.
 
 ## Sinais de parar AGORA
 

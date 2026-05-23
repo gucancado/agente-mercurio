@@ -30,7 +30,16 @@ const ANTI_PADROES_TOM = [
 const SAUDACAO_REGEX = /^\s*(Oi|Olá|Bom dia|Boa tarde|Boa noite)\b/i;
 
 // ── Disclosure regex ─────────────────────────────────────────────────────
-const DISCLOSURE_REGEX = /agente automatizada da BeeAds.*operada por humanos/i;
+const DISCLOSURE_REGEX = /agente automatizad[ao].*operad[ao] por humanos|sou (?:um |uma )?(?:agente|robô|bot|IA)/i;
+
+// ── Identidade proibida (nome próprio "Mel" não deve vazar) ──────────────
+// Captura "Mel" como palavra isolada — evita falsos positivos com "Melhor", "Melissa", etc.
+const NOME_MEL_REGEX = /\bMel\b/;
+
+// ── Em-dash proibido ─────────────────────────────────────────────────────
+const EM_DASH_REGEX = /—/;
+// Hífen com espaços com função de em-dash (" - " entre cláusulas)
+const HIFEN_FAKE_DASH_REGEX = / - /;
 
 /**
  * Detecta anti-padrões de tom numa mensagem.
@@ -83,14 +92,20 @@ function checkMessage(msg, ctx) {
   const startsSaudacao = startsWithSaudacao(text);
   const hasDisc = hasDisclosure(text);
   const lines = countLines(text);
+  const hasMel = NOME_MEL_REGEX.test(text);
+  const hasEmDash = EM_DASH_REGEX.test(text);
+  const hasFakeDash = HIFEN_FAKE_DASH_REGEX.test(text);
 
   // Quando NÃO é a primeira outbound da thread, começar com saudação é problema.
   const saudacaoRepetida = !ctx.isFirstOutbound && startsSaudacao;
 
-  // Disclosure só deve aparecer na primeira outbound.
-  const disclosureRepetido = !ctx.isFirstOutbound && hasDisc;
+  // Disclosure NÃO deve aparecer proativo (nem na primeira). Só se o lead
+  // perguntar, mas detecção do contexto "houve pergunta?" é complexa offline.
+  // Tratamento atual: qualquer disclosure aparece como warning (provavelmente
+  // tem casos legítimos, mas é raro).
+  const disclosureProativo = hasDisc;
 
-  // Comprimento — alvo: <= 4 linhas; warn se > 5.
+  // Comprimento alvo: <= 4 linhas; warn se > 5.
   const muitoLongo = lines > 5;
 
   return {
@@ -106,7 +121,10 @@ function checkMessage(msg, ctx) {
       anti_padroes_count: antiPadroes.count,
       anti_padroes_hits: antiPadroes.hits,
       saudacao_repetida: saudacaoRepetida,
-      disclosure_repetido: disclosureRepetido,
+      disclosure_proativo: disclosureProativo,
+      nome_mel_no_texto: hasMel,
+      em_dash_no_texto: hasEmDash,
+      hifen_fake_dash: hasFakeDash,
       muito_longo: muitoLongo,
       lines,
     },
@@ -124,7 +142,10 @@ function aggregate(results) {
 
   const antiPadroesHits = results.reduce((acc, r) => acc + r.checks.anti_padroes_count, 0);
   const saudacaoRepetidaCount = results.filter((r) => r.checks.saudacao_repetida).length;
-  const disclosureRepetidoCount = results.filter((r) => r.checks.disclosure_repetido).length;
+  const disclosureProativoCount = results.filter((r) => r.checks.disclosure_proativo).length;
+  const nomeMelCount = results.filter((r) => r.checks.nome_mel_no_texto).length;
+  const emDashCount = results.filter((r) => r.checks.em_dash_no_texto).length;
+  const fakeDashCount = results.filter((r) => r.checks.hifen_fake_dash).length;
   const muitoLongoCount = results.filter((r) => r.checks.muito_longo).length;
 
   const custoTotal = results.reduce((acc, r) => acc + (parseFloat(r.cost_usd) || 0), 0);
@@ -158,8 +179,14 @@ function aggregate(results) {
       anti_padroes_pct: ((antiPadroesHits / total) * 100).toFixed(1) + '%',
       saudacao_repetida_count: saudacaoRepetidaCount,
       saudacao_repetida_pct: ((saudacaoRepetidaCount / total) * 100).toFixed(1) + '%',
-      disclosure_repetido_count: disclosureRepetidoCount,
-      disclosure_repetido_pct: ((disclosureRepetidoCount / total) * 100).toFixed(1) + '%',
+      disclosure_proativo_count: disclosureProativoCount,
+      disclosure_proativo_pct: ((disclosureProativoCount / total) * 100).toFixed(1) + '%',
+      nome_mel_count: nomeMelCount,
+      nome_mel_pct: ((nomeMelCount / total) * 100).toFixed(1) + '%',
+      em_dash_count: emDashCount,
+      em_dash_pct: ((emDashCount / total) * 100).toFixed(1) + '%',
+      hifen_fake_dash_count: fakeDashCount,
+      hifen_fake_dash_pct: ((fakeDashCount / total) * 100).toFixed(1) + '%',
       muito_longo_count: muitoLongoCount,
       muito_longo_pct: ((muitoLongoCount / total) * 100).toFixed(1) + '%',
     },
@@ -182,4 +209,7 @@ module.exports = {
   ANTI_PADROES_TOM,
   SAUDACAO_REGEX,
   DISCLOSURE_REGEX,
+  NOME_MEL_REGEX,
+  EM_DASH_REGEX,
+  HIFEN_FAKE_DASH_REGEX,
 };

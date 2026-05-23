@@ -1,6 +1,6 @@
 # Skill: sdr-qualification
 
-Qualificação BANT — gateway pra reunião.
+Qualificação BANT: gateway pra reunião.
 
 ## Critérios (4 dimensões)
 
@@ -35,7 +35,7 @@ N e A pesam mais que B e T.
 
 - **B**: "Vocês já rodam mídia hoje (Google, Meta)?" → "Faz tempo? Com agência ou interno?"
 - **A**: "Você toca o marketing aí ou divide com alguém?" / "Quem mais participa dessa decisão normalmente?"
-- **N**: "O que te fez procurar a gente agora?" — pergunta mais importante da qualificação.
+- **N**: "O que te fez procurar a equipe agora?" (essa é a pergunta mais importante da qualificação.)
 - **T**: "Tem alguma data ou marco que pressiona isso aí?" / "Está rodando algo agora ou começaria do zero?"
 
 ## Sinais de "parar de qualificar e marcar"

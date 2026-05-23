@@ -108,7 +108,10 @@ async function main() {
       (r) =>
         r.checks.anti_padroes_count > 0 ||
         r.checks.saudacao_repetida ||
-        r.checks.disclosure_repetido ||
+        r.checks.disclosure_proativo ||
+        r.checks.nome_mel_no_texto ||
+        r.checks.em_dash_no_texto ||
+        r.checks.hifen_fake_dash ||
         r.checks.muito_longo
     ),
   };
@@ -144,7 +147,10 @@ async function main() {
     if (issue.checks.anti_padroes_count > 0)
       flags.push(`tom(${issue.checks.anti_padroes_hits.map((h) => h.word).join(',')})`);
     if (issue.checks.saudacao_repetida) flags.push('saudacao');
-    if (issue.checks.disclosure_repetido) flags.push('disclosure');
+    if (issue.checks.disclosure_proativo) flags.push('disclosure');
+    if (issue.checks.nome_mel_no_texto) flags.push('NOME_MEL');
+    if (issue.checks.em_dash_no_texto) flags.push('EM_DASH');
+    if (issue.checks.hifen_fake_dash) flags.push('FAKE_DASH');
     if (issue.checks.muito_longo) flags.push(`longo(${issue.checks.lines}L)`);
     console.log(`  id=${issue.message_id} [${flags.join('|')}]`);
     console.log(`    "${issue.text_preview}..."`);
@@ -175,8 +181,14 @@ async function main() {
       const sign = a > b ? '↑' : a < b ? '↓' : '=';
       console.log(`  ${kpi.padEnd(28)} ${atual} (baseline ${base}, ${sign}${delta})`);
     };
-    cmp(agg.quality.anti_padroes_pct, baseline.summary.quality.anti_padroes_pct, 'anti_padroes_pct');
-    cmp(agg.quality.saudacao_repetida_pct, baseline.summary.quality.saudacao_repetida_pct, 'saudacao_repetida_pct');
+    cmp(agg.quality.anti_padroes_pct, baseline.summary.quality.anti_padroes_pct || '0.0%', 'anti_padroes_pct');
+    cmp(agg.quality.saudacao_repetida_pct, baseline.summary.quality.saudacao_repetida_pct || '0.0%', 'saudacao_repetida_pct');
+    if (agg.quality.em_dash_pct !== undefined) {
+      cmp(agg.quality.em_dash_pct, (baseline.summary.quality.em_dash_pct || '0.0%'), 'em_dash_pct');
+    }
+    if (agg.quality.nome_mel_pct !== undefined) {
+      cmp(agg.quality.nome_mel_pct, (baseline.summary.quality.nome_mel_pct || '0.0%'), 'nome_mel_pct');
+    }
     cmp(agg.cost.avg_usd, baseline.summary.cost.avg_usd, 'cost.avg_usd');
     console.log('');
   } else {

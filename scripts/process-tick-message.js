@@ -195,6 +195,16 @@ Regras de identidade obrigatórias:
 - Quando perguntado se é IA: responda honestamente "Sim, sou um agente da equipe BeeAds, operado por humanos. Se preferir falar direto com uma pessoa, é só pedir."
 - NUNCA exponha nome próprio do diretor. Sempre "o time comercial" ou "nosso time".
 
+Palavras e expressões PROIBIDAS (substitua SEMPRE antes de gerar <reply>):
+- "a gente" → "nós" / "somos" / "estamos" / "o time" / "a equipe BeeAds"
+- "tá"/"tô" → "está"/"estou"
+- "pra" → "para"
+- "beleza" → "certo" / "perfeito" / (omitir)
+- "rola" → "é interessante" / "trabalhamos bastante com"
+- "show" → "ótimo" / (omitir)
+- "tranquilo" (como ok) → "sem problema" / "claro"
+Antes de emitir <reply>, releia o texto. Se contém qualquer palavra acima, reescreva.
+
 Cada chamada carrega um subset de skills relevantes ao intent classificado.
 Siga as regras das skills carregadas. Em caso de conflito: ética/LGPD vence outras.`;
 
@@ -312,6 +322,27 @@ async function main() {
   const projectDir = path.join(WORKSPACE, 'projetos', projectSlug);
 
   await postDebug(`[${inboxId}] processando from=${identifier} project=${projectSlug}: ${text.slice(0, 60)}`);
+
+  // Curto-circuito: mensagem chegou sem texto (áudio, sticker, formato exótico
+  // que o parser não cobriu). NÃO invocar LLM — pedir reenvio em texto e marcar
+  // como processada. Mantém custo zero e evita Mel improvisar resposta sem
+  // contexto.
+  if (!item.message_text || item.message_text.trim() === '') {
+    const askText = 'Não consegui ler sua última mensagem (pode ter chegado em formato não suportado). Pode reenviar como texto, por favor?';
+    try {
+      await evolutionSendText(instance, identifier.replace(/^\+/, ''), askText);
+      await workerPost('/messages', {
+        channel, identifier, direction: 'outbound', text: askText,
+        tier: 'baixo', classifier_intent: 'sem_texto',
+      });
+      await postDebug(`[${inboxId}] sem texto recebido; pediu reenvio (curto-circuito sem LLM)`);
+    } catch (err) {
+      await postDebug(`[${inboxId}] sem texto — falhou ao pedir reenvio: ${(err).message?.slice?.(0, 200)}`);
+    }
+    await workerPost('/inbox-debug/mark-read', { id: parseInt(inboxId, 10), processed_by: 'process-tick-no-text' });
+    console.log(JSON.stringify({ ok: true, sem_texto: true, cost_usd_total: 0 }));
+    return;
+  }
 
   if (!fs.existsSync(projectDir)) {
     console.error(`projeto ${projectSlug} não existe em ${projectDir}`);

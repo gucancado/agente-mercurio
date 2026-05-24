@@ -378,6 +378,27 @@ async function main() {
   const projectSlug = instance.split('-').slice(1).join('-');
   const projectDir = path.join(WORKSPACE, 'projetos', projectSlug);
 
+  // Toggle de projeto: lê _platform/disabled-projects.json (gerenciado pela
+  // console agentes-beeads). Se o projeto está na lista, NÃO responde —
+  // apenas marca a inbox como processada e sai. Funciona como pausa segura
+  // pra desativar atendimento em um único projeto sem mexer no agente todo.
+  try {
+    const disabledPath = path.join(WORKSPACE, '_platform/disabled-projects.json');
+    if (fs.existsSync(disabledPath)) {
+      const disabled = JSON.parse(fs.readFileSync(disabledPath, 'utf8'))?.disabled || [];
+      if (Array.isArray(disabled) && disabled.includes(projectSlug)) {
+        await postDebug(`[${inboxId}] projeto ${projectSlug} pausado via disabled-projects.json — skip`);
+        try {
+          await workerPost('/inbox-debug/mark-read', { id: parseInt(inboxId, 10), processed_by: 'process-tick-paused' });
+        } catch {}
+        console.log(JSON.stringify({ ok: true, skipped: true, reason: 'project_disabled', project: projectSlug }));
+        return;
+      }
+    }
+  } catch (err) {
+    await postDebug(`[${inboxId}] falha ao ler disabled-projects: ${err.message?.slice(0, 120)}`);
+  }
+
   await postDebug(`[${inboxId}] processando from=${identifier} project=${projectSlug}: ${text.slice(0, 60)}`);
 
   // Curto-circuito: mensagem chegou sem texto (áudio, sticker, formato exótico

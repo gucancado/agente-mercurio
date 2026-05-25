@@ -59,5 +59,9 @@ RUN find /opt/agent/seed -name '*.sh' -type f -exec sed -i 's/\r$//' {} \; \
 WORKDIR /workspace
 USER agent
 
+# Healthcheck — trigger-server.js expõe GET /health na PORT (default 3000).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -fsS "http://localhost:${PORT:-3000}/health" >/dev/null || exit 1
+
 # Entrypoint fora do volume; vai popular /workspace se necessário.
 ENTRYPOINT ["bash", "/opt/agent/seed/docker/entrypoint.sh"]

@@ -1,6 +1,6 @@
 /**
  * check-quality.js — bateria de checks automáticos sobre mensagens
- * outbound da Mel.
+ * outbound do agente.
  *
  * Usado tanto pelo eval offline (sobre messages do DB) quanto pelo eval
  * de replay futuro (sobre outputs gerados).
@@ -32,7 +32,9 @@ const SAUDACAO_REGEX = /^\s*(Oi|Olá|Bom dia|Boa tarde|Boa noite)\b/i;
 // ── Disclosure regex ─────────────────────────────────────────────────────
 const DISCLOSURE_REGEX = /agente automatizad[ao].*operad[ao] por humanos|sou (?:um |uma )?(?:agente|robô|bot|IA)/i;
 
-// ── Identidade proibida (nome próprio "Mel" não deve vazar) ──────────────
+// ── Identidade proibida (nomes internos/legados não devem vazar no chat) ──
+// "Mel" foi o nome interno legado até 2026-05-25 (renomeado pra "SDR da BeeAds").
+// Esse check garante que o nome antigo não reapareça em outbounds.
 // Captura "Mel" como palavra isolada — evita falsos positivos com "Melhor", "Melissa", etc.
 const NOME_MEL_REGEX = /\bMel\b/;
 

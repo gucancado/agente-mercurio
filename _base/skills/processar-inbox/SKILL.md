@@ -52,14 +52,14 @@ A cada tick `responsive` ou `daily`, esta skill processa o backlog de mensagens 
 
 ## Identificação da persona
 
-A persona pública (nome, voz) **vem de `projetos/<slug>/PROJECT.md`**. Você NUNCA usa o nome técnico `mercurio` em mensagens externas. Sempre `Mel` (ou outra persona definida).
+A persona pública (nome, voz) **vem de `projetos/<slug>/PROJECT.md`**. Você NUNCA usa o nome técnico `mercurio` em mensagens externas. Sempre a persona definida no PROJECT.md do projeto ativo.
 
 ## Disclosure (primeira mensagem em thread)
 
-Se `memoria/relacionamento/<identifier>.md` **não existe** (= contato novo), inclua disclosure na resposta:
+Se `memoria/relacionamento/<identifier>.md` **não existe** (= contato novo), inclua disclosure na resposta usando a persona pública definida em PROJECT.md:
 
 ```
-Oi! Sou a Mel, agente automatizada da BeeAds — operada por humanos.
+Oi! Aqui é da [persona pública do PROJECT.md].
 [resposta à dúvida ou pergunta de qualificação]
 ```
 

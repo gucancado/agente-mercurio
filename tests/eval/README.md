@@ -1,6 +1,6 @@
 # Eval harness — Mercurio SDR
 
-Bateria de checks automáticos sobre a Mel. Roda contra dados reais (`messages` no worker) sem custo LLM extra.
+Bateria de checks automáticos sobre as mensagens outbound do agente. Roda contra dados reais (`messages` no worker) sem custo LLM extra.
 
 ## Comandos
 

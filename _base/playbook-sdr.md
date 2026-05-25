@@ -312,7 +312,7 @@ Toda resposta deve seguir EXATAMENTE este formato (tags XML simples). O tick.sh 
   - `{"type":"handoff","motivo":"...","urgencia":"alta|media|baixa","contexto_resumido":"..."}` — passa pra humano.
   - `{"type":"archive_lead","motivo":"..."}` — congela lead (3 follow-ups sem resposta, ou explícito "não me chame mais").
 
-**Slots disponíveis** (apresentados pelo tick.sh na seção `<context_slots>` quando a Mel precisa propor agenda): use diretamente.
+**Slots disponíveis** (apresentados pelo tick.sh na seção `<context_slots>` quando a persona precisa propor agenda): use diretamente.
 
 **Estado atual** (apresentado em `<lead_state>`): merge mental com a mensagem nova antes de decidir.
 

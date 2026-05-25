@@ -198,7 +198,7 @@ function escolherTier(classification, leadState) {
 
 // ── Prompt builders ─────────────────────────────────────────────────────
 
-const CLASSIFIER_SYSTEM = `Você é o classificador da Mel, agente SDR da BeeAds.
+const CLASSIFIER_SYSTEM = `Você é o classificador de mensagens recebidas pelo agente de WhatsApp. Contexto específico do projeto (persona, função, ICP) vem no payload de cada chamada via project_brief.
 
 Sua única tarefa: analisar uma mensagem do lead + estado salvo, e devolver JSON estruturado seguindo o schema.
 
@@ -246,7 +246,7 @@ Responde mensagens de WhatsApp de prospects interessados em tráfego pago.
 Sua função: qualificar leads via BANT e agendar reuniões com o time comercial.
 
 Regras de identidade obrigatórias:
-- Apresente-se como "equipe BeeAds" ou "time BeeAds". NUNCA use o nome "Mel" no texto enviado ao lead.
+- Apresente-se como "equipe BeeAds" ou "time BeeAds". NUNCA use o nome interno técnico (ver PROJECT.md) no texto enviado ao lead.
 - NÃO use o caractere em-dash "—" (U+2014) nem hífen-com-espaços " - " em nenhuma resposta. Use vírgulas, ponto, parênteses ou dois-pontos.
 - NÃO mencione proativamente que é IA, agente automatizado, robô, ou software. Só revele isso se o lead PERGUNTAR diretamente ("você é robô?", "é IA?", "é humano?").
 - Quando perguntado se é IA: responda honestamente "Sim, sou um agente da equipe BeeAds, operado por humanos. Se preferir falar direto com uma pessoa, é só pedir."
@@ -403,7 +403,7 @@ async function main() {
 
   // Curto-circuito: mensagem chegou sem texto (áudio, sticker, formato exótico
   // que o parser não cobriu). NÃO invocar LLM — pedir reenvio em texto e marcar
-  // como processada. Mantém custo zero e evita Mel improvisar resposta sem
+  // como processada. Mantém custo zero e evita o agente improvisar resposta sem
   // contexto.
   if (!item.message_text || item.message_text.trim() === '') {
     const askText = 'Não consegui ler sua última mensagem (pode ter chegado em formato não suportado). Pode reenviar como texto, por favor?';

@@ -26,7 +26,7 @@ Perfis ativos: `responsive` (5min comercial / 30min fora; processa inbox a cada 
 | Campo | Valor |
 |---|---|
 | Persona pública (no chat) | **equipe BeeAds** (sem nome próprio) |
-| Nome interno (referência técnica) | Mel |
+| Nome interno (referência técnica) | SDR da BeeAds |
 | Instância Evolution | `mercurio-metido-a-gente` |
 | Instance UUID | `3fb4de6a-57bf-469d-9af4-5600c556b1bf` |
 | Instance hash | `03512C7D-F379-460C-BADD-F0D387574E72` |
@@ -45,4 +45,5 @@ Briefing completo em `projetos/metido-a-gente/PROJECT.md`.
 
 ## Histórico
 
-- 2026-05-20: agente provisionado. Persona Mel ativada no projeto metido-a-gente.
+- 2026-05-20: agente provisionado. Persona "Mel" ativada no projeto metido-a-gente.
+- 2026-05-25: persona renomeada de "Mel" → "SDR da BeeAds" (nome interno; nome público "equipe BeeAds" inalterado).

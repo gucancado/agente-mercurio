@@ -56,7 +56,7 @@ fi
 
 INBOX_JSON=$(curl -fsS --max-time 10 \
   -H "X-Agent-Token: ${WORKER_TOKEN}" \
-  "${WORKER_URL}/inbox-debug?unread_only=true&limit=10" 2>/dev/null)
+  "${WORKER_URL}/inbox-debug?unread_only=true&grouped=true&limit=10" 2>/dev/null)
 
 if [[ -z "$INBOX_JSON" ]]; then
   log "erro buscando inbox"
@@ -81,7 +81,10 @@ TICK_CAP=$(yq -r '.guardrails.cost_cap_usd_per_tick // 0.10' "$WORKSPACE/scripts
 ORCHESTRATOR="$WORKSPACE/scripts/process-tick-message.js"
 
 while IFS= read -r ITEM; do
-  ID=$(jq -r '.id' <<<"$ITEM")
+  # Em modo grouped, item tem .ids (array) em vez de .id. Pega o último (mais
+  # recente) pra logging — o orquestrador marca todos como lidos no fim.
+  ID=$(jq -r '.ids[-1] // .id' <<<"$ITEM")
+  COUNT=$(jq -r '.count // 1' <<<"$ITEM")
   TEXT=$(jq -r '.message_text // "(sem texto)"' <<<"$ITEM")
   IDENTIFIER=$(jq -r '.identifier // ""' <<<"$ITEM")
 
@@ -114,7 +117,7 @@ while IFS= read -r ITEM; do
     COST=$(jq -r '.cost_usd_total // 0' <<<"$RESULT_JSON")
     INTENT=$(jq -r '.classifier_intent // "?"' <<<"$RESULT_JSON")
     PREVIEW=$(jq -r '.reply_preview // ""' <<<"$RESULT_JSON")
-    log "id=$ID OK intent=$INTENT cost=\$$COST"
+    log "id=$ID (group=$COUNT) OK intent=$INTENT cost=\$$COST"
     TOTAL_COST=$(awk -v t="$TOTAL_COST" -v c="$COST" 'BEGIN { print t + c }')
     PROCESSED=$((PROCESSED+1))
   else

@@ -368,8 +368,17 @@ async function main() {
   const raw = await readStdin();
   const item = JSON.parse(raw);
 
-  // Esperado: { id, channel, instance, identifier, message_text, push_name }
-  const inboxId = item.id;
+  // Esperado: ou { id, ... } (legacy single) ou { ids: [...], ... } (grouped).
+  // Em modo grouped, message_text já vem concatenado pelo worker. Mark-read
+  // usa todos os ids do grupo no final.
+  const inboxIds = Array.isArray(item.ids) && item.ids.length
+    ? item.ids.map((n) => parseInt(n, 10))
+    : (item.id != null ? [parseInt(item.id, 10)] : []);
+  if (inboxIds.length === 0) {
+    console.error('process-tick-message: item sem id nem ids');
+    process.exit(2);
+  }
+  const inboxId = inboxIds[inboxIds.length - 1]; // mais recente, pra logging
   const channel = item.channel || 'whatsapp';
   const instance = item.instance;
   const identifier = item.identifier;
@@ -389,7 +398,7 @@ async function main() {
       if (Array.isArray(disabled) && disabled.includes(projectSlug)) {
         await postDebug(`[${inboxId}] projeto ${projectSlug} pausado via disabled-projects.json — skip`);
         try {
-          await workerPost('/inbox-debug/mark-read', { id: parseInt(inboxId, 10), processed_by: 'process-tick-paused' });
+          await workerPost('/inbox-debug/mark-read', { ids: inboxIds, processed_by: 'process-tick-paused' });
         } catch {}
         console.log(JSON.stringify({ ok: true, skipped: true, reason: 'project_disabled', project: projectSlug }));
         return;
@@ -399,7 +408,8 @@ async function main() {
     await postDebug(`[${inboxId}] falha ao ler disabled-projects: ${err.message?.slice(0, 120)}`);
   }
 
-  await postDebug(`[${inboxId}] processando from=${identifier} project=${projectSlug}: ${text.slice(0, 60)}`);
+  const groupTag = inboxIds.length > 1 ? ` (group=${inboxIds.length})` : '';
+  await postDebug(`[${inboxId}]${groupTag} processando from=${identifier} project=${projectSlug}: ${text.slice(0, 60)}`);
 
   // Curto-circuito: mensagem chegou sem texto (áudio, sticker, formato exótico
   // que o parser não cobriu). NÃO invocar LLM — pedir reenvio em texto e marcar
@@ -417,7 +427,7 @@ async function main() {
     } catch (err) {
       await postDebug(`[${inboxId}] sem texto — falhou ao pedir reenvio: ${(err).message?.slice?.(0, 200)}`);
     }
-    await workerPost('/inbox-debug/mark-read', { id: parseInt(inboxId, 10), processed_by: 'process-tick-no-text' });
+    await workerPost('/inbox-debug/mark-read', { ids: inboxIds, processed_by: 'process-tick-no-text' });
     console.log(JSON.stringify({ ok: true, sem_texto: true, cost_usd_total: 0 }));
     return;
   }
@@ -522,7 +532,7 @@ async function main() {
       contexto_resumido: `Trigger=${classification.trigger_critico} intent=${classification.intent}. Mensagem: ${text.slice(0, 200)}`,
     });
     await workerPost('/inbox-debug/mark-read', {
-      id: parseInt(inboxId, 10),
+      ids: inboxIds,
       processed_by: 'process-tick',
     });
     console.log(JSON.stringify({
@@ -634,9 +644,9 @@ async function main() {
     await workerPost('/lead-state', { channel, identifier, patch: postStatePatch });
   }
 
-  // ── 11. Marca inbox como processado ──
+  // ── 11. Marca inbox como processado (todos do grupo) ──
   await workerPost('/inbox-debug/mark-read', {
-    id: parseInt(inboxId, 10),
+    ids: inboxIds,
     processed_by: 'process-tick',
   });
 

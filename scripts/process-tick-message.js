@@ -311,8 +311,12 @@ function parseResponderOutput(text) {
 // ── Action handlers ─────────────────────────────────────────────────────
 
 async function applyAction(action, ctx) {
-  const { channel, identifier } = ctx;
+  const { channel, identifier, projectSlug } = ctx;
   if (!action || !action.type) return;
+
+  // ?project=<slug> ativa o backend real (Google Calendar) no worker.
+  // Sem ele, o worker fica no path legacy (simulated_meetings mock).
+  const projectQs = projectSlug ? `?project=${encodeURIComponent(projectSlug)}` : '';
 
   if (action.type === 'handoff') {
     await workerPost('/handoff', {
@@ -322,7 +326,7 @@ async function applyAction(action, ctx) {
       contexto_resumido: action.contexto_resumido || '',
     });
   } else if (action.type === 'schedule_meeting') {
-    await workerPost('/meetings/schedule', {
+    await workerPost(`/meetings/schedule${projectQs}`, {
       channel, identifier,
       slot_iso: action.slot_iso,
       slot_human: action.slot_human,
@@ -332,7 +336,7 @@ async function applyAction(action, ctx) {
       contexto: action.contexto,
     });
   } else if (action.type === 'reschedule_meeting') {
-    await workerPost(`/meetings/${action.meeting_id}/reschedule`, {
+    await workerPost(`/meetings/${action.meeting_id}/reschedule${projectQs}`, {
       slot_iso: action.slot_iso,
       slot_human: action.slot_human,
     });
@@ -451,7 +455,7 @@ async function main() {
   const temp = leadState?.temperatura || '';
   if (proximaTipo.includes('marcar') || proximaTipo.includes('reuniao') || temp === 'quente') {
     try {
-      const slotsResp = await workerGet('/meetings/suggest-slots');
+      const slotsResp = await workerGet(`/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}`);
       contextSlots = slotsResp.slots || [];
     } catch {}
   }
@@ -621,7 +625,7 @@ async function main() {
 
   // ── 9. Aplica actions ──
   for (const action of actions) {
-    try { await applyAction(action, { channel, identifier }); }
+    try { await applyAction(action, { channel, identifier, projectSlug }); }
     catch (err) {
       await postDebug(`[${inboxId}] action ${action.type} falhou: ${err.message.slice(0, 200)}`);
     }

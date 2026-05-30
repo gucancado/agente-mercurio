@@ -543,6 +543,36 @@ async function main() {
       };
     }
   }
+
+  // Fallback: classifier (Haiku) frequentemente NÃO popula slot_escolhido_iso
+  // mesmo quando o lead escolheu claramente um slot. Quando isso acontece e
+  // intent é escolha_horario/confirmacao, inferimos do texto do lead procurando
+  // (dia da semana + hora) que case com algum slot oferecido. Sem esse fallback,
+  // o state perde o slot escolhido entre turns e o agente regressa a re-oferecer.
+  if (!slotEscolhido
+      && contextSlots.length > 0
+      && (classification.intent === 'escolha_horario' || classification.intent === 'confirmacao')) {
+    const txt = (text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const inferred = contextSlots.find((s) => {
+      if (!s || !s.day_label || typeof s.hour !== 'number') return false;
+      const dayWord = String(s.day_label).split(' ')[0].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      if (!txt.includes(dayWord)) return false;
+      const min = typeof s.minute === 'number' ? s.minute : 0;
+      const mm = String(min).padStart(2, '0');
+      const patterns = [
+        `${s.hour}h${min === 0 ? '' : mm}`,        // 14h, 14h30, 14h45
+        `${s.hour}:${mm}`,                          // 14:00, 14:30
+        `${s.hour} h${min === 0 ? '' : mm}`,        // 14 h, 14 h30
+      ];
+      return patterns.some((p) => txt.includes(p));
+    });
+    if (inferred) {
+      slotEscolhido = inferred;
+      statePatch.slot_escolhido_iso = inferred.iso;
+      statePatch.slot_escolhido_human = inferred.human;
+      await postDebug(`[${inboxId}] slot inferido do texto (classifier omitiu): ${inferred.iso}`);
+    }
+  }
   if (classification.atualizacao_bant && Object.keys(classification.atualizacao_bant).length) {
     statePatch.qualificacao = {
       ...(leadState.qualificacao || {}),

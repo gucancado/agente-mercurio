@@ -99,11 +99,28 @@ while IFS= read -r ITEM; do
       -H "Content-Type: application/json" \
       -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" '{channel:$ch, identifier:$id}')" \
       "${WORKER_URL}/sdr/reset" >/dev/null 2>&1
-    curl -fsS --max-time 20 -X POST \
-      -H "apikey: ${EVOLUTION_API_KEY}" \
+    PROJECT_SLUG="${INSTANCE#*-}"
+    SEND_PAYLOAD=$(jq -nc \
+      --arg slug "$PROJECT_SLUG" \
+      --arg inst "$INSTANCE" \
+      --arg id "$IDENTIFIER" \
+      --arg t "Conversa zerada. Pode mandar *oi* que começo do zero 👍" \
+      '{projectSlug:$slug, instance:$inst, identifier:$id, text:$t}')
+    if ! echo "$SEND_PAYLOAD" | timeout 20s node "$WORKSPACE/scripts/zerar-reply.js" >/dev/null 2>&1; then
+      log "id=$ID FALHA enviando confirmação zerar-conversa"
+    fi
+    # marca mensagem(ns) como lida(s) no worker (o /sdr/reset não faz isso).
+    # Suporta grouped (array .ids) e single (.id).
+    MARK_PAYLOAD=$(jq -nc --argjson item "$ITEM" \
+      'if ($item.ids // null) != null
+         then {ids: ($item.ids|map(tonumber)), processed_by:"zerar-conversa"}
+         else {id: ($item.id|tonumber), processed_by:"zerar-conversa"}
+       end')
+    curl -fsS --max-time 5 -X POST \
+      -H "X-Agent-Token: ${WORKER_TOKEN}" \
       -H "Content-Type: application/json" \
-      -d "$(jq -nc --arg n "${IDENTIFIER#+}" --arg t "Conversa zerada. Pode mandar *oi* que começo do zero 👍" '{number:$n, text:$t}')" \
-      "${EVOLUTION_API_URL}/message/sendText/${INSTANCE}" >/dev/null 2>&1
+      -d "$MARK_PAYLOAD" \
+      "${WORKER_URL}/inbox-debug/mark-read" >/dev/null 2>&1
     PROCESSED=$((PROCESSED+1))
     continue
   fi

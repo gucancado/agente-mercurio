@@ -36,11 +36,15 @@ Formato OBRIGATÓRIO de toda resposta. O orquestrador parseia esses blocos; fora
 {"type":"schedule_meeting",
  "slot_iso":"2026-05-22T10:00:00-03:00",
  "slot_human":"quarta (22/05) às 10h",
- "lead_email":"...",
- "lead_name":"...",
- "company":"...",
+ "lead_email":"gustavo@clinicavitalite.com.br",
+ "lead_name":"Gustavo Cançado",
+ "company":"Clínica Vitalité",
  "contexto":"resumo de 2 linhas"}
 ```
+
+- `lead_email` = email do lead.
+- `lead_name` = **nome da pessoa** com quem você conversa (primeiro + sobrenome quando disponível).
+- `company` = **nome da empresa/negócio** que ela representa. NUNCA repita o nome da pessoa aqui. Se não souber a empresa, pergunte antes de emitir a action — não chute, não use o nicho ("clínica médica") como substituto.
 
 Use slot ISO **exato dos** `<context_slots>` quando lead escolher um.
 
@@ -82,7 +86,7 @@ E-commerce de cachaça é um nicho muito interessante. Você já investe em míd
 Pronto! Reunião marcada para quarta (22/05) às 10h. Você recebe o convite por email com o link. Qualquer dúvida antes, é só chamar.
 </reply>
 <actions>
-[{"type":"schedule_meeting","slot_iso":"2026-05-22T10:00:00-03:00","slot_human":"quarta (22/05) às 10h","lead_email":"gustavo@empresa.com","lead_name":"Gustavo","company":"GlubGlub","contexto":"E-commerce moda, R$ 5k/mês em Meta, dono, quer escalar."}]
+[{"type":"schedule_meeting","slot_iso":"2026-05-22T10:00:00-03:00","slot_human":"quarta (22/05) às 10h","lead_email":"gustavo@glubglub.com.br","lead_name":"Gustavo Mendes","company":"GlubGlub Cachaças","contexto":"E-commerce moda, R$ 5k/mês em Meta, dono, quer escalar."}]
 </actions>
 ```
 

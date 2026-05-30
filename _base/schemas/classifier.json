@@ -42,10 +42,10 @@
       "additionalProperties": false,
       "description": "Fatos sobre o lead que esta mensagem revelou. Apenas campos com valor; omita os ausentes.",
       "properties": {
-        "nome": { "type": "string" },
-        "empresa": { "type": "string" },
+        "nome": { "type": "string", "description": "Nome próprio da PESSOA com quem se conversa (primeiro + sobrenome quando disponível). NÃO é nome de empresa, nem nicho. Ex: 'Gustavo Cançado', 'Ana Silva'." },
+        "empresa": { "type": "string", "description": "Nome da EMPRESA/negócio que a pessoa representa (razão social ou marca). NÃO é o nome da pessoa, nem o nicho. Ex: 'Clínica Vitalité', 'Acme Marketing'. Se o lead só disse o segmento ('clínica médica', 'e-commerce') sem nome próprio do negócio, deixe este campo vazio e use 'nicho'." },
         "email": { "type": "string" },
-        "nicho": { "type": "string", "description": "Segmento do negócio do lead — ex: 'clínica médica', 'e-commerce moda', 'SaaS B2B'." },
+        "nicho": { "type": "string", "description": "Segmento do negócio do lead — ex: 'clínica médica', 'e-commerce moda', 'SaaS B2B'. NÃO é nome próprio de empresa." },
         "investimento_mes_brl": {
           "type": "number",
           "description": "Investimento mensal declarado em mídia paga, em BRL. Use número, não faixa."

@@ -449,26 +449,35 @@ async function main() {
   const leadState = stateResp.state || {};
   const isFirstMessage = !stateResp.exists;
 
-  // ── 2. Pre-fetch slots se quente ou marcando ──
-  let contextSlots = [];
-  const proximaTipo = leadState?.proxima_acao?.tipo || '';
-  const temp = leadState?.temperatura || '';
-  if (proximaTipo.includes('marcar') || proximaTipo.includes('reuniao') || temp === 'quente') {
-    try {
-      const slotsResp = await workerGet(`/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}`);
-      contextSlots = slotsResp.slots || [];
-    } catch {}
-  }
+  // ── 2. Pre-fetch slots SEMPRE (em paralelo com o classifier) ──
+  // Custo: 1 query DB + 1 chamada Google Calendar (cacheada por agenda no worker).
+  // Roda incondicional para garantir <context_slots> populado sempre que o
+  // lead pedir agendamento de primeira (sem estado prévio). Se a chamada
+  // falhar, segue com slots vazios — a skill manda o agente NÃO inventar.
+  // Precisa de project+channel+identifier pra cair no path real (Google);
+  // sem identifier vira gerador mock determinístico no worker.
+  const slotsUrl =
+    `/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}` +
+    `&channel=${encodeURIComponent(channel)}` +
+    `&identifier=${encodeURIComponent(identifier)}`;
+  const slotsPromise = workerGet(slotsUrl).catch((err) => {
+    postDebug(`[${inboxId}] suggest-slots falhou: ${err.message?.slice(0, 200)}`).catch(() => {});
+    return { slots: [] };
+  });
 
-  // ── 3. Classifier ──
+  // ── 3. Classifier (em paralelo com pré-fetch de slots) ──
   const classifierModel = pickClassifierModel(projectDir);
   let classification;
   let classifierMetric;
+  let contextSlots = [];
+  let slotsSource = null;
   try {
     const req = buildClassifierRequest({ leadMessage: text, leadState, model: classifierModel });
-    const resp = await complete(req);
-    classification = resp.result;
-    classifierMetric = resp;
+    const [classifierResp, slotsResp] = await Promise.all([complete(req), slotsPromise]);
+    classification = classifierResp.result;
+    classifierMetric = classifierResp;
+    contextSlots = Array.isArray(slotsResp?.slots) ? slotsResp.slots : [];
+    slotsSource = slotsResp?.source || null;
   } catch (err) {
     await postDebug(`[${inboxId}] classifier falhou: ${err.message.slice(0, 200)}`);
     // Registra erro nas métricas mas segue com classification minimal
@@ -480,7 +489,7 @@ async function main() {
   }
 
   await postDebug(
-    `[${inboxId}] classifier: intent=${classification.intent} trigger=${classification.trigger_critico} complex=${classification.complexidade} cost=$${classifierMetric.cost_usd.toFixed(6)} cache_r=${classifierMetric.cache_read_tokens}`
+    `[${inboxId}] classifier: intent=${classification.intent} trigger=${classification.trigger_critico} complex=${classification.complexidade} cost=$${classifierMetric.cost_usd.toFixed(6)} cache_r=${classifierMetric.cache_read_tokens} slots=${contextSlots.length}(${slotsSource ?? 'none'})`
   );
 
   // ── 4. Aplica fatos_novos + BANT no lead_state ──

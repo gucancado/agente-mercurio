@@ -449,21 +449,38 @@ async function main() {
   const leadState = stateResp.state || {};
   const isFirstMessage = !stateResp.exists;
 
-  // ── 2. Pre-fetch slots SEMPRE (em paralelo com o classifier) ──
-  // Custo: 1 query DB + 1 chamada Google Calendar (cacheada por agenda no worker).
-  // Roda incondicional para garantir <context_slots> populado sempre que o
-  // lead pedir agendamento de primeira (sem estado prévio). Se a chamada
-  // falhar, segue com slots vazios — a skill manda o agente NÃO inventar.
-  // Precisa de project+channel+identifier pra cair no path real (Google);
-  // sem identifier vira gerador mock determinístico no worker.
-  const slotsUrl =
-    `/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}` +
-    `&channel=${encodeURIComponent(channel)}` +
-    `&identifier=${encodeURIComponent(identifier)}`;
-  const slotsPromise = workerGet(slotsUrl).catch((err) => {
-    postDebug(`[${inboxId}] suggest-slots falhou: ${err.message?.slice(0, 200)}`).catch(() => {});
-    return { slots: [] };
-  });
+  // ── 2. Pre-fetch slots com CACHE no lead_state ──
+  // PROBLEMA HISTÓRICO (slot drift, fix 2026-05-30): /meetings/suggest-slots é
+  // stateful — cada chamada cria 3 holds tentativos no Google Calendar. Se
+  // chamarmos a cada tick, holds antigos viram "ocupado" e a função retorna
+  // slots cada vez mais tardios. O Haiku lê o <context_slots> mais recente e
+  // responde horário diferente do que o lead escolheu → drift.
+  //
+  // SOLUÇÃO: cachear os slots oferecidos no lead_state. Re-buscar SÓ quando:
+  //   (a) não temos cache (slots_oferecidos vazio/ausente) OU
+  //   (b) cache está stale (>10min) OU
+  //   (c) o lead já escolheu um slot e queremos refresh pra próxima rodada
+  //       de agendamento (não cobre aqui — schedule_meeting consome o cache).
+  const SLOTS_TTL_MS = 10 * 60 * 1000;
+  const cachedSlots = Array.isArray(leadState.slots_oferecidos) ? leadState.slots_oferecidos : [];
+  const cachedAt = leadState.slots_oferecidos_at ? Date.parse(leadState.slots_oferecidos_at) : 0;
+  const cacheFresh = cachedSlots.length > 0 && (Date.now() - cachedAt) < SLOTS_TTL_MS;
+
+  let slotsPromise;
+  let usedCachedSlots = false;
+  if (cacheFresh) {
+    usedCachedSlots = true;
+    slotsPromise = Promise.resolve({ slots: cachedSlots, source: 'cache' });
+  } else {
+    const slotsUrl =
+      `/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}` +
+      `&channel=${encodeURIComponent(channel)}` +
+      `&identifier=${encodeURIComponent(identifier)}`;
+    slotsPromise = workerGet(slotsUrl).catch((err) => {
+      postDebug(`[${inboxId}] suggest-slots falhou: ${err.message?.slice(0, 200)}`).catch(() => {});
+      return { slots: [] };
+    });
+  }
 
   // ── 3. Classifier (em paralelo com pré-fetch de slots) ──
   const classifierModel = pickClassifierModel(projectDir);
@@ -489,22 +506,48 @@ async function main() {
   }
 
   await postDebug(
-    `[${inboxId}] classifier: intent=${classification.intent} trigger=${classification.trigger_critico} complex=${classification.complexidade} cost=$${classifierMetric.cost_usd.toFixed(6)} cache_r=${classifierMetric.cache_read_tokens} slots=${contextSlots.length}(${slotsSource ?? 'none'})`
+    `[${inboxId}] classifier: intent=${classification.intent} trigger=${classification.trigger_critico} complex=${classification.complexidade} cost=$${classifierMetric.cost_usd.toFixed(6)} cache_r=${classifierMetric.cache_read_tokens} slots=${contextSlots.length}(${slotsSource ?? 'none'}) cached=${usedCachedSlots}`
   );
 
-  // ── 4. Aplica fatos_novos + BANT no lead_state ──
+  // ── 4. Aplica fatos_novos + BANT + slots no lead_state ──
   const statePatch = {};
-  if (classification.fatos_novos && Object.keys(classification.fatos_novos).length) {
-    statePatch.fatos_coletados = {
-      ...(leadState.fatos_coletados || {}),
-      ...classification.fatos_novos,
-    };
+
+  // slot_escolhido_iso é separado de fatos_coletados — é estado top-level que
+  // serve pra blindar o orquestrador contra o Haiku errar o slot na action.
+  // Só aceitamos se bater LITERALMENTE com um dos slots oferecidos.
+  let slotEscolhido = null;
+  if (classification.fatos_novos) {
+    const fn = { ...classification.fatos_novos };
+    if (fn.slot_escolhido_iso) {
+      const candidato = fn.slot_escolhido_iso;
+      const offered = Array.isArray(contextSlots) ? contextSlots : [];
+      const match = offered.find((s) => s && s.iso === candidato);
+      if (match) {
+        slotEscolhido = match; // {iso, human, ...}
+        statePatch.slot_escolhido_iso = match.iso;
+        statePatch.slot_escolhido_human = match.human;
+      } else {
+        await postDebug(`[${inboxId}] classifier devolveu slot_escolhido_iso=${candidato} mas não bate com offered=${offered.map(s=>s.iso).join('|')} — ignorando`);
+      }
+      delete fn.slot_escolhido_iso; // não vai pra fatos_coletados
+    }
+    if (Object.keys(fn).length) {
+      statePatch.fatos_coletados = {
+        ...(leadState.fatos_coletados || {}),
+        ...fn,
+      };
+    }
   }
   if (classification.atualizacao_bant && Object.keys(classification.atualizacao_bant).length) {
     statePatch.qualificacao = {
       ...(leadState.qualificacao || {}),
       ...classification.atualizacao_bant,
     };
+  }
+  // Se acabamos de buscar slots novos do worker, persiste no cache do state.
+  if (!usedCachedSlots && contextSlots.length > 0) {
+    statePatch.slots_oferecidos = contextSlots;
+    statePatch.slots_oferecidos_at = new Date().toISOString();
   }
   if (Object.keys(statePatch).length) {
     await workerPost('/lead-state', { channel, identifier, patch: statePatch });
@@ -634,6 +677,20 @@ async function main() {
 
   // ── 9. Aplica actions ──
   for (const action of actions) {
+    // Defesa anti-slot-drift: se temos um slot_escolhido_iso travado no state
+    // (que veio do classifier batendo com slots oferecidos) E o LLM emitiu
+    // schedule_meeting com slot diferente, FORÇA o slot do state. Protege
+    // contra o Haiku ler context_slots novos e escolher horário diferente do
+    // que o lead aprovou.
+    if (action && action.type === 'schedule_meeting' && leadState.slot_escolhido_iso) {
+      if (action.slot_iso !== leadState.slot_escolhido_iso) {
+        await postDebug(
+          `[${inboxId}] slot override: LLM enviou slot_iso=${action.slot_iso} mas state.slot_escolhido_iso=${leadState.slot_escolhido_iso} — forçando o do state`
+        );
+        action.slot_iso = leadState.slot_escolhido_iso;
+        if (leadState.slot_escolhido_human) action.slot_human = leadState.slot_escolhido_human;
+      }
+    }
     try { await applyAction(action, { channel, identifier, projectSlug }); }
     catch (err) {
       await postDebug(`[${inboxId}] action ${action.type} falhou: ${err.message.slice(0, 200)}`);
@@ -648,6 +705,12 @@ async function main() {
   if (actions.some((a) => a.type === 'schedule_meeting')) {
     postStatePatch.tags = Array.from(new Set([...(leadState.tags || []), 'reuniao_agendada']));
     postStatePatch.proxima_acao = { tipo: 'reuniao_agendada', motivo: 'agendamento confirmado' };
+    // Limpa o cache de slots — a reunião foi marcada, qualquer reschedule
+    // futuro deve buscar slots frescos.
+    postStatePatch.slots_oferecidos = [];
+    postStatePatch.slots_oferecidos_at = null;
+    postStatePatch.slot_escolhido_iso = null;
+    postStatePatch.slot_escolhido_human = null;
   } else if (actions.some((a) => a.type === 'handoff')) {
     postStatePatch.proxima_acao = { tipo: 'handoff_solicitado', motivo: 'aguardando humano' };
   } else {

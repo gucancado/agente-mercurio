@@ -48,6 +48,8 @@ Formato OBRIGATÓRIO de toda resposta. O orquestrador parseia esses blocos; fora
 
 Use os valores `iso` e `human` **literais** do slot escolhido em `<context_slots>`. NUNCA invente datas.
 
+**Se `<lead_state>` contém `slot_escolhido_iso` / `slot_escolhido_human`**, o lead JÁ travou o horário em uma mensagem anterior. USE esses dois valores na action (e no texto), em vez de re-escolher um slot de `<context_slots>`. O orquestrador também valida isso em código, mas você deve emitir certo da primeira vez.
+
 **Quando emitir `schedule_meeting`** (checklist obrigatório):
 1. Há slot escolhido (lead respondeu confirmando um dos slots oferecidos em `<context_slots>`).
 2. Há `lead_email` válido (do próprio lead, nesta thread).

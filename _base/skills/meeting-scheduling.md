@@ -29,6 +29,16 @@ Quando o lead está qualificado (ver `sdr-qualification`) E sinalizou prontidão
 - Use `iso` LITERAL como `slot_iso` na action.
 - Se `<context_slots>` chegar vazio (`[]`), NÃO improvise datas. Responda algo como *"Deixa eu confirmar a agenda do time e te volto agora com horários, ok?"* e NÃO emita `schedule_meeting`.
 
+## Slot escolhido travado — REGRA INVIOLÁVEL
+
+Se `<lead_state>` contém `slot_escolhido_iso` e `slot_escolhido_human`, o lead JÁ escolheu o horário em uma mensagem anterior. NESSE CASO:
+
+- USE `slot_escolhido_iso` como `slot_iso` na action `schedule_meeting` (ignore qualquer outro item de `<context_slots>`).
+- USE `slot_escolhido_human` no texto da `<reply>` quando referenciar o horário.
+- NÃO re-ofereça lista de slots de novo. NÃO sugira "ou prefere outro dia?". NÃO troque o horário "porque o context_slots agora mostra outro".
+- Se faltam apenas dados (email/empresa), só PEÇA o que falta confirmando o slot já travado: *"Ótimo, {slot_escolhido_human}. Falta só o email e o nome da empresa pra mandar o convite."*
+- Os 3 slots que estão em `<context_slots>` podem mudar a cada turno por motivos técnicos. Eles NÃO sobrescrevem o slot que o lead já aprovou.
+
 ## Fluxo padrão (4 passos)
 
 ### 1. Propor opções fechadas

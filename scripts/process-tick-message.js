@@ -334,11 +334,16 @@ async function applyAction(action, ctx) {
       lead_name: action.lead_name,
       company: action.company,
       contexto: action.contexto,
+      // worker em /meetings/schedule decide path real (Google) vs legacy
+      // (simulated_meetings) pela presença de body.project — não pela
+      // querystring. Sem isso TUDO cai em fallback simulated.
+      project: projectSlug || undefined,
     });
   } else if (action.type === 'reschedule_meeting') {
     await workerPost(`/meetings/${action.meeting_id}/reschedule${projectQs}`, {
       slot_iso: action.slot_iso,
       slot_human: action.slot_human,
+      project: projectSlug || undefined,
     });
   } else if (action.type === 'archive_lead') {
     await workerPost('/lead-state', {

@@ -100,13 +100,26 @@ while IFS= read -r ITEM; do
       -d "$(jq -nc --arg ch "$CHANNEL" --arg id "$IDENTIFIER" '{channel:$ch, identifier:$id}')" \
       "${WORKER_URL}/sdr/reset" >/dev/null 2>&1
     PROJECT_SLUG="${INSTANCE#*-}"
+    REPLY_TEXT="Conversa zerada. Pode mandar *oi* que começo do zero 👍"
     SEND_PAYLOAD=$(jq -nc \
       --arg slug "$PROJECT_SLUG" \
       --arg inst "$INSTANCE" \
       --arg id "$IDENTIFIER" \
-      --arg t "Conversa zerada. Pode mandar *oi* que começo do zero 👍" \
+      --arg t "$REPLY_TEXT" \
       '{projectSlug:$slug, instance:$inst, identifier:$id, text:$t}')
-    if ! echo "$SEND_PAYLOAD" | timeout 20s node "$WORKSPACE/scripts/zerar-reply.js" >/dev/null 2>&1; then
+    if echo "$SEND_PAYLOAD" | timeout 20s node "$WORKSPACE/scripts/zerar-reply.js" >/dev/null 2>&1; then
+      # Persiste o outbound em /messages pra trail/observabilidade.
+      curl -fsS --max-time 5 -X POST \
+        -H "X-Agent-Token: ${WORKER_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -nc \
+          --arg project "$PROJECT_SLUG" \
+          --arg ch "$CHANNEL" \
+          --arg id "$IDENTIFIER" \
+          --arg t "$REPLY_TEXT" \
+          '{project:$project, channel:$ch, identifier:$id, direction:"outbound", text:$t, tier:"meta", classifier_intent:"reset"}')" \
+        "${WORKER_URL}/messages" >/dev/null 2>&1
+    else
       log "id=$ID FALHA enviando confirmação zerar-conversa"
     fi
     # marca mensagem(ns) como lida(s) no worker (o /sdr/reset não faz isso).

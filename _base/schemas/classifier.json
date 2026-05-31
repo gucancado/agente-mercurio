@@ -53,6 +53,10 @@
         "slot_escolhido_iso": {
           "type": "string",
           "description": "ISO 8601 do slot que o lead escolheu NESTA mensagem, quando aplicável. SÓ preencher se o lead claramente escolheu um dos slots oferecidos previamente (ex: 'segunda 14h' quando havia slot 'Segunda-feira (02/06) às 14h' nos slots oferecidos). DEVE BATER LITERALMENTE com o campo 'iso' de um dos itens em <context_slots> ou em lead_state.slots_oferecidos. NÃO inventar formato. NÃO usar se o lead não escolheu (ex: só perguntou sobre horários, recusou, pediu outro dia). Formato exemplo: '2026-06-01T14:00:00-03:00'."
+        },
+        "recusa_slots": {
+          "type": "boolean",
+          "description": "Setar true quando o lead claramente RECUSA os slots oferecidos previamente OU pede um período/dia DIFERENTE do que foi mostrado. Exemplos que disparam true: 'nenhum desses funciona', 'prefiro a tarde' (se os oferecidos eram da manhã, ou vice-versa), 'só consigo na segunda' (se os oferecidos não eram só segunda), 'tem outro horário?', 'outro dia, por favor'. NÃO setar quando: o lead apenas escolhe um dos slots (use slot_escolhido_iso), ou apenas pede confirmação. Quando true, o orquestrador invalida o cache slots_oferecidos e busca novos."
         }
       }
     },

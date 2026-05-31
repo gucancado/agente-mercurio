@@ -39,6 +39,25 @@ Se `<lead_state>` contém `slot_escolhido_iso` e `slot_escolhido_human`, o lead 
 - Se faltam apenas dados (email/empresa), só PEÇA o que falta confirmando o slot já travado: *"Ótimo, {slot_escolhido_human}. Falta só o email e o nome da empresa pra mandar o convite."*
 - Os 3 slots que estão em `<context_slots>` podem mudar a cada turno por motivos técnicos. Eles NÃO sobrescrevem o slot que o lead já aprovou.
 
+## Recusa de horários (campo `recusa_slots`)
+
+Quando o lead RECUSA explicitamente os slots oferecidos OU pede período/dia DIFERENTE do que foi mostrado, o classifier deve setar `recusa_slots: true` em `fatos_novos`. Isso faz o orquestrador invalidar o cache de slots, e o próximo turn busca slots novos (idealmente alinhados ao que o lead pediu).
+
+**Setar `recusa_slots: true` quando o lead diz coisas como:**
+- "nenhum desses funciona"
+- "prefiro a tarde" (e os slots oferecidos eram da manhã, ou vice-versa)
+- "só consigo na segunda" (e os slots oferecidos não eram só segunda)
+- "tem outro horário?"
+- "outro dia, por favor"
+
+**NÃO setar `recusa_slots` quando:**
+- Lead apenas escolhe um dos slots oferecidos ("segunda 14h") — use `slot_escolhido_iso`.
+- Lead pede uma confirmação ("é isso mesmo?", "pode confirmar?").
+- Lead muda de tópico (vira `intent=outro` sem `recusa_slots`).
+- Lead já tem `slot_escolhido_iso` travado e apenas pergunta algo sobre a reunião.
+
+Quando `recusa_slots=true` o slot escolhido anterior também é resetado, pra evitar inconsistência.
+
 ## Fluxo padrão (4 passos)
 
 ### 1. Propor opções fechadas

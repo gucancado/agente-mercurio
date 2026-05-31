@@ -521,6 +521,7 @@ async function main() {
   // serve pra blindar o orquestrador contra o Haiku errar o slot na action.
   // Só aceitamos se bater LITERALMENTE com um dos slots oferecidos.
   let slotEscolhido = null;
+  let recusaExplicita = false;
   if (classification.fatos_novos) {
     const fn = { ...classification.fatos_novos };
     if (fn.slot_escolhido_iso) {
@@ -536,6 +537,10 @@ async function main() {
       }
       delete fn.slot_escolhido_iso; // não vai pra fatos_coletados
     }
+    if (fn.recusa_slots === true) {
+      recusaExplicita = true;
+    }
+    delete fn.recusa_slots; // não vai pra fatos_coletados, é meta
     if (Object.keys(fn).length) {
       statePatch.fatos_coletados = {
         ...(leadState.fatos_coletados || {}),
@@ -573,6 +578,48 @@ async function main() {
       await postDebug(`[${inboxId}] slot inferido do texto (classifier omitiu): ${inferred.iso}`);
     }
   }
+
+  // Bug #2: invalida cache de slots quando lead recusa o que foi oferecido
+  // ou pede outro período. Sem isso o agente confirma slot incoerente com
+  // a preferência do lead, ou pior, faz match no cache antigo via fallback
+  // de inferência. Só roda se o lead NÃO escolheu um slot (slotEscolhido
+  // tem prioridade).
+  if (!slotEscolhido
+      && Array.isArray(leadState.slots_oferecidos)
+      && leadState.slots_oferecidos.length > 0) {
+    let recusaInferida = false;
+    if (!recusaExplicita
+        && ['escolha_horario', 'outro', 'qualificacao_resposta'].includes(classification.intent)) {
+      const txt = (text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const padroesRecusa = [
+        'nenhum desses',
+        'nenhum funciona',
+        'nao funciona',
+        'não funciona',
+        'prefiro a tarde',
+        'prefiro a manha',
+        'prefiro a manhã',
+        'so consigo',
+        'só consigo',
+        'tem outro',
+        'outros horarios',
+        'outros horários',
+        'outro horario',
+        'outro horário',
+        'outro dia',
+        'outra semana',
+      ];
+      recusaInferida = padroesRecusa.some((p) => txt.includes(p));
+    }
+    if (recusaExplicita || recusaInferida) {
+      statePatch.slots_oferecidos = [];
+      statePatch.slots_oferecidos_at = null;
+      statePatch.slot_escolhido_iso = null;
+      statePatch.slot_escolhido_human = null;
+      await postDebug(`[${inboxId}] recusa de slots detectada (explicit=${recusaExplicita} inferred=${recusaInferida}) — invalidando cache`);
+    }
+  }
+
   if (classification.atualizacao_bant && Object.keys(classification.atualizacao_bant).length) {
     statePatch.qualificacao = {
       ...(leadState.qualificacao || {}),

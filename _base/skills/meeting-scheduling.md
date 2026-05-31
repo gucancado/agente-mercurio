@@ -58,6 +58,28 @@ Quando o lead RECUSA explicitamente os slots oferecidos OU pede período/dia DIF
 
 Quando `recusa_slots=true` o slot escolhido anterior também é resetado, pra evitar inconsistência.
 
+## Preferências de período/dia (`preferencia_periodo`, `preferencia_dia`)
+
+Quando o lead manifesta preferência sobre horário ou dia, o classifier deve extrair:
+
+- `preferencia_periodo`: `"manha"` | `"tarde"` | `"qualquer"`
+- `preferencia_dia`: `"seg"` | `"ter"` | `"qua"` | `"qui"` | `"sex"` | `"qualquer"`
+
+Esses campos são gravados no `lead_state` e na próxima chamada de `suggest-slots` o backend filtra. Sem isso o agente acaba oferecendo slots manhã pra um lead que pediu "tarde".
+
+**Setar quando lead diz coisas como:**
+- "prefiro de tarde" → `preferencia_periodo: "tarde"`
+- "só consigo de manhã" → `preferencia_periodo: "manha"`
+- "qualquer horário" → `preferencia_periodo: "qualquer"`
+- "pode ser segunda" → `preferencia_dia: "seg"`
+- "qualquer dia da semana" → `preferencia_dia: "qualquer"`
+
+**NÃO setar:**
+- Se o lead apenas escolheu um slot específico ("segunda 14h") — esse é `slot_escolhido_iso`.
+- Se o lead não falou nada sobre período ou dia.
+
+A preferência persiste no state mesmo após `recusa_slots` invalidar o cache — então pedir "outro horário" mantém a preferência declarada anteriormente.
+
 ## Fluxo padrão (4 passos)
 
 ### 1. Propor opções fechadas

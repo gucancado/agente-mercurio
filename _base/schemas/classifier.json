@@ -57,6 +57,16 @@
         "recusa_slots": {
           "type": "boolean",
           "description": "Setar true quando o lead claramente RECUSA os slots oferecidos previamente OU pede um período/dia DIFERENTE do que foi mostrado. Exemplos que disparam true: 'nenhum desses funciona', 'prefiro a tarde' (se os oferecidos eram da manhã, ou vice-versa), 'só consigo na segunda' (se os oferecidos não eram só segunda), 'tem outro horário?', 'outro dia, por favor'. NÃO setar quando: o lead apenas escolhe um dos slots (use slot_escolhido_iso), ou apenas pede confirmação. Quando true, o orquestrador invalida o cache slots_oferecidos e busca novos."
+        },
+        "preferencia_periodo": {
+          "type": "string",
+          "enum": ["manha", "tarde", "qualquer"],
+          "description": "Período do dia preferido pelo lead. Setar quando o lead manifesta preferência clara: 'prefiro de tarde' → 'tarde'; 'só consigo de manhã' → 'manha'; 'qualquer horário tá bom' → 'qualquer'. NÃO setar se o lead não falou nada sobre período. Quando setado, o orquestrador filtra suggest-slots pelo período."
+        },
+        "preferencia_dia": {
+          "type": "string",
+          "enum": ["seg", "ter", "qua", "qui", "sex", "qualquer"],
+          "description": "Dia da semana preferido pelo lead. Setar quando o lead manifesta preferência clara: 'na segunda' → 'seg'; 'pode ser quarta' → 'qua'; 'qualquer dia da semana' → 'qualquer'. NÃO setar se o lead não falou nada sobre dia específico. Quando setado, o orquestrador filtra suggest-slots pelo dia."
         }
       }
     },

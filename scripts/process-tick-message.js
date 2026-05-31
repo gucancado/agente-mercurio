@@ -477,10 +477,21 @@ async function main() {
     usedCachedSlots = true;
     slotsPromise = Promise.resolve({ slots: cachedSlots, source: 'cache' });
   } else {
-    const slotsUrl =
+    // Aplica filtros de preferencia (dia/periodo) se o lead já manifestou
+    // — fixa bug em que recusa de slots da manhã levava o agente a sugerir
+    // outro slot da manhã porque suggest-slots ignorava a preferência.
+    const periodPref = leadState.preferencia_periodo;
+    const dayPref = leadState.preferencia_dia;
+    let slotsUrl =
       `/meetings/suggest-slots?project=${encodeURIComponent(projectSlug)}` +
       `&channel=${encodeURIComponent(channel)}` +
       `&identifier=${encodeURIComponent(identifier)}`;
+    if (periodPref && ['manha', 'tarde', 'qualquer'].includes(periodPref)) {
+      slotsUrl += `&period=${periodPref}`;
+    }
+    if (dayPref && ['seg', 'ter', 'qua', 'qui', 'sex', 'qualquer'].includes(dayPref)) {
+      slotsUrl += `&day=${dayPref}`;
+    }
     slotsPromise = workerGet(slotsUrl).catch((err) => {
       postDebug(`[${inboxId}] suggest-slots falhou: ${err.message?.slice(0, 200)}`).catch(() => {});
       return { slots: [] };
@@ -541,11 +552,54 @@ async function main() {
       recusaExplicita = true;
     }
     delete fn.recusa_slots; // não vai pra fatos_coletados, é meta
+
+    // Preferências de período/dia ficam top-level no state, não em fatos_coletados.
+    // Quando setadas, próxima chamada de suggest-slots filtra por elas.
+    const PERIODO_VALIDOS = ['manha', 'tarde', 'qualquer'];
+    const DIA_VALIDOS = ['seg', 'ter', 'qua', 'qui', 'sex', 'qualquer'];
+    if (fn.preferencia_periodo && PERIODO_VALIDOS.includes(fn.preferencia_periodo)) {
+      statePatch.preferencia_periodo = fn.preferencia_periodo;
+    }
+    delete fn.preferencia_periodo;
+    if (fn.preferencia_dia && DIA_VALIDOS.includes(fn.preferencia_dia)) {
+      statePatch.preferencia_dia = fn.preferencia_dia;
+    }
+    delete fn.preferencia_dia;
+
     if (Object.keys(fn).length) {
       statePatch.fatos_coletados = {
         ...(leadState.fatos_coletados || {}),
         ...fn,
       };
+    }
+  }
+
+  // Fallback heurístico pra preferências: classifier pode omitir igual omite
+  // slot_escolhido_iso. Detecta padrões pt-BR no texto do lead.
+  if (!statePatch.preferencia_periodo) {
+    const txt = (text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (/\b(prefiro|so consigo|melhor) (de |a |pela |pra )?tarde\b/.test(txt)
+        || /\btarde mesmo\b/.test(txt)
+        || /\ba tarde\b/.test(txt)) {
+      statePatch.preferencia_periodo = 'tarde';
+    } else if (/\b(prefiro|so consigo|melhor) (de |a |pela |pra )?manha\b/.test(txt)
+               || /\bmanha mesmo\b/.test(txt)
+               || /\ba manha\b/.test(txt)) {
+      statePatch.preferencia_periodo = 'manha';
+    }
+  }
+  if (!statePatch.preferencia_dia) {
+    const txt = (text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const diaPatterns = [
+      [/\b(qualquer|todo) (dia|um)?\b/, 'qualquer'],
+      [/\bsegunda(-feira)?\b/, 'seg'],
+      [/\bterca(-feira)?\b/, 'ter'],
+      [/\bquarta(-feira)?\b/, 'qua'],
+      [/\bquinta(-feira)?\b/, 'qui'],
+      [/\bsexta(-feira)?\b/, 'sex'],
+    ];
+    for (const [pat, val] of diaPatterns) {
+      if (pat.test(txt)) { statePatch.preferencia_dia = val; break; }
     }
   }
 

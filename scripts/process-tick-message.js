@@ -206,6 +206,12 @@ Sua única tarefa: analisar uma mensagem do lead + estado salvo, e devolver JSON
 - trigger_critico: detectar situações que exigem humano (crise, abuso, reclamação, LGPD, fechamento)
 - complexidade: trivial (saudação/confirmação curta) | normal (qualificação) | alta (objeção, ambiguidade)
 - fatos_novos: extrair nome, empresa, email, nicho, investimento mensal — APENAS o que a mensagem revela
+
+REGRA DE COLETA PENDENTE (dica forte): se \`lead_state.coleta_pendente\` é uma lista não-vazia, o agente JÁ pediu esse(s) campo(s) e está esperando a resposta. Nesse caso:
+- intent = 'confirmacao' (são dados finais de agendamento, NÃO 'qualificacao_resposta' nem 'outro').
+- Se \`coleta_pendente\` inclui 'empresa' e a mensagem é um nome curto de negócio/marca (ex: "dog amigo", "clínica vitalité"), extraia em \`fatos_novos.empresa\` LITERALMENTE — mesmo que pareça genérico. NÃO confunda com 'nicho'.
+- Se inclui 'email' e a mensagem contém um email, extraia em \`fatos_novos.email\`.
+- Só fuja dessa regra se a mensagem for claramente outra coisa (pergunta, recusa, mudança de assunto).
 - atualizacao_bant: B (orçamento), A (autoridade), N (necessidade), T (timing). "ok" se a mensagem confirma, "fraco" se confirma negativamente, omitir se silenciosa.
 
 NÃO gere texto livre. NÃO explique. Devolva só o JSON via tool_use.`;
@@ -469,7 +475,11 @@ async function main() {
   const SLOTS_TTL_MS = 10 * 60 * 1000;
   const cachedSlots = Array.isArray(leadState.slots_oferecidos) ? leadState.slots_oferecidos : [];
   const cachedAt = leadState.slots_oferecidos_at ? Date.parse(leadState.slots_oferecidos_at) : 0;
-  const cacheFresh = cachedSlots.length > 0 && (Date.now() - cachedAt) < SLOTS_TTL_MS;
+  // Slot já escolhido: NÃO re-buscar slots. Cada suggest-slots cria holds novos
+  // e empurra horários pra frente (drift). Depois da escolha não precisamos de
+  // slots novos — usamos o cache pro responder referenciar o slot travado.
+  const slotLocked = !!leadState.slot_escolhido_iso && cachedSlots.length > 0;
+  const cacheFresh = slotLocked || (cachedSlots.length > 0 && (Date.now() - cachedAt) < SLOTS_TTL_MS);
 
   let slotsPromise;
   let usedCachedSlots = false;
@@ -633,6 +643,39 @@ async function main() {
     }
   }
 
+  // FIX coleta_pendente (bind): quando o agente já pediu um campo específico
+  // (email/empresa) e está esperando a resposta, o lead frequentemente manda
+  // uma msg curta ("dog amigo") que o classifier (Haiku) tagueia como `outro`
+  // sem extrair o fato. Sem este bind, o estado perde o dado e o agente regride
+  // (re-saudação + re-coleta). Rede de segurança determinística: vincula a msg
+  // curta ao primeiro campo pendente, com guards anti-falso-positivo.
+  {
+    const pend = Array.isArray(leadState.coleta_pendente) ? leadState.coleta_pendente : [];
+    const campo = pend[0];
+    if (campo) {
+      const jaExtraido = statePatch.fatos_coletados && statePatch.fatos_coletados[campo];
+      const jaTinha = (leadState.fatos_coletados || {})[campo];
+      const raw = (text || '').trim();
+      const emailMatch = raw.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+      const ehPergunta = /\?\s*$/.test(raw);
+      const curto = raw.split(/\s+/).length <= 4 && raw.length <= 60 && raw.length >= 2;
+      const mergeInto = (k, v) => {
+        statePatch.fatos_coletados = {
+          ...(leadState.fatos_coletados || {}),
+          ...(statePatch.fatos_coletados || {}),
+          [k]: v,
+        };
+      };
+      if (campo === 'empresa' && !jaExtraido && !jaTinha && !emailMatch && !ehPergunta && curto) {
+        mergeInto('empresa', raw);
+        await postDebug(`[${inboxId}] coleta bind: empresa="${raw}" (classifier omitiu; campo pendente)`);
+      } else if (campo === 'email' && !jaExtraido && !jaTinha && emailMatch) {
+        mergeInto('email', emailMatch[0]);
+        await postDebug(`[${inboxId}] coleta bind: email="${emailMatch[0]}" (classifier omitiu; campo pendente)`);
+      }
+    }
+  }
+
   // Bug #2: invalida cache de slots quando lead recusa o que foi oferecido
   // ou pede outro período. Sem isso o agente confirma slot incoerente com
   // a preferência do lead, ou pior, faz match no cache antigo via fallback
@@ -685,6 +728,29 @@ async function main() {
     statePatch.slots_oferecidos = contextSlots;
     statePatch.slots_oferecidos_at = new Date().toISOString();
   }
+
+  // FIX coleta_pendente (registro): quando há slot travado e ainda faltam dados
+  // pro convite, grava no state quais campos faltam (ordem: email, empresa).
+  // Esse campo vira dica FORTE pro classifier do próximo turno (msg curta vira
+  // `confirmacao` + extração) e habilita o bind determinístico acima. Limpa
+  // quando a escolha foi resetada (recusa) — schedule_meeting limpa no passo 10.
+  {
+    const slotClearedAgora = statePatch.slot_escolhido_iso === null;
+    const slotIsoNow = statePatch.slot_escolhido_iso || leadState.slot_escolhido_iso;
+    if (slotClearedAgora) {
+      statePatch.coleta_pendente = [];
+    } else if (slotIsoNow) {
+      const fc = {
+        ...(leadState.fatos_coletados || {}),
+        ...(statePatch.fatos_coletados || {}),
+      };
+      const faltam = [];
+      if (!fc.email) faltam.push('email');
+      if (!fc.empresa) faltam.push('empresa');
+      statePatch.coleta_pendente = faltam;
+    }
+  }
+
   if (Object.keys(statePatch).length) {
     await workerPost('/lead-state', { channel, identifier, patch: statePatch });
     Object.assign(leadState, statePatch); // reflete localmente pro responder ver
@@ -742,8 +808,16 @@ async function main() {
   // Skills modulares (Fase 3): carrega só as relevantes ao intent classificado.
   // Ordem alfabética → cache key estável → cache hit em chamadas com mesma
   // combinação de skills.
-  const { names: skillsLoaded, text: skillsText } = loadSkillsForIntent(classification.intent);
-  await postDebug(`[${inboxId}] skills: ${skillsLoaded.join(', ')}`);
+  // Mid-agendamento: força meeting-scheduling mesmo se o classifier devolveu
+  // intent=outro (ex: lead manda nome da empresa e Haiku tagueia errado). Sem
+  // isso o responder perde as regras de slot travado / não re-saudar / não
+  // re-ofertar e regride a conversa.
+  const midScheduling =
+    !!leadState.slot_escolhido_iso ||
+    (Array.isArray(leadState.coleta_pendente) && leadState.coleta_pendente.length > 0);
+  const extraSkills = midScheduling ? ['meeting-scheduling'] : [];
+  const { names: skillsLoaded, text: skillsText } = loadSkillsForIntent(classification.intent, extraSkills);
+  await postDebug(`[${inboxId}] skills: ${skillsLoaded.join(', ')}${midScheduling ? ' (mid-scheduling)' : ''}`);
 
   const respReq = buildResponderRequest({
     leadMessage: text, leadState, classification, contextSlots,
@@ -754,7 +828,24 @@ async function main() {
   });
   const respResp = await complete(respReq);
   const responderText = respResp.result;
-  const { reply, actions } = parseResponderOutput(responderText);
+  const parsed = parseResponderOutput(responderText);
+  let reply = parsed.reply;
+  const actions = parsed.actions;
+
+  // FIX re-saudação: saudação ("Oi <nome>!") só na 1ª mensagem da thread. Guard
+  // determinístico independente do modelo — se NÃO é a primeira e o reply abre
+  // com saudação, remove o prefixo e recapitaliza. Cobre o bug de re-saudar
+  // mid-thread quando a conversa regride ou o modelo escorrega.
+  if (!isFirstMessage && reply) {
+    const stripped = reply.replace(
+      /^\s*(oi|olá|ola|opa|e a[ií]|bom dia|boa tarde|boa noite)\b[\s,!]*[A-Za-zÀ-ÿ]*[\s,!.]*/i,
+      ''
+    );
+    if (stripped && stripped !== reply) {
+      reply = stripped.charAt(0).toUpperCase() + stripped.slice(1);
+      await postDebug(`[${inboxId}] saudação removida (não é 1ª msg da thread)`);
+    }
+  }
 
   await postDebug(
     `[${inboxId}] responder tier=${tier} model=${responderModel} cost=$${respResp.cost_usd.toFixed(6)} cache_r=${respResp.cache_read_tokens}: ${reply.slice(0, 120)}`
@@ -847,6 +938,7 @@ async function main() {
     postStatePatch.slots_oferecidos_at = null;
     postStatePatch.slot_escolhido_iso = null;
     postStatePatch.slot_escolhido_human = null;
+    postStatePatch.coleta_pendente = [];
   } else if (actions.some((a) => a.type === 'handoff')) {
     postStatePatch.proxima_acao = { tipo: 'handoff_solicitado', motivo: 'aguardando humano' };
   } else {

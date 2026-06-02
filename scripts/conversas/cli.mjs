@@ -137,7 +137,7 @@ try {
           'Comandos:',
           '  recent [--since 24h] [--include-tests]   threads recentes',
           '  thread <numero> [--since all]            uma conversa inteira',
-          '  meetings [--status all]                  reuniões persistidas',
+          '  meetings [--status all]                  ⚠️ LEGADO: só simulated_meetings, não reflete Google Calendar',
           '  metrics [--since 7d]                     resumo llm_metrics',
           '  tail [--interval 90] [--include-tests]   monitorar ao vivo',
           '  mark-test <numero> "motivo"              marcar contato como teste',

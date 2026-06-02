@@ -88,8 +88,13 @@ export function renderThread(messages, identifier) {
 }
 
 export function renderMeetings(meetings) {
-  if (!meetings.length) return 'Nenhuma reunião persistida.';
-  const out = [`# Reuniões persistidas (${meetings.length})\n`];
+  const legacyBanner =
+    '⚠️  LEGADO: este comando lê APENAS a tabela `simulated_meetings` (path sem project).\n' +
+    '    Agendamentos reais (com project, ex. metido-a-gente) vão pro Google Calendar e\n' +
+    '    NÃO aparecem aqui. NÃO use ausência de row aqui como prova de "confirmação fantasma" —\n' +
+    '    cruze com o Google Calendar (MCP `claude.ai Google Calendar`) pra confirmar de verdade.\n';
+  if (!meetings.length) return `${legacyBanner}\nNenhuma reunião na tabela legada simulated_meetings.`;
+  const out = [legacyBanner, `# Reuniões legadas (simulated_meetings) — ${meetings.length}\n`];
   for (const m of meetings) {
     out.push(
       `[${m.status}] ${ts(m.slot_iso)}  "${m.slot_human || ''}"  ${m.lead_email || '-'}  ` +

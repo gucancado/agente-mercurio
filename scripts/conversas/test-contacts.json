@@ -1,0 +1,8 @@
+{
+  "_doc": "Contatos de TESTE (stress-tests do dono, smoke tests, etc). Excluídos por default em `recent`. Use --include-tests para mostrar. Marque novos com `cli.mjs mark-test <numero> \"motivo\"`.",
+  "contacts": {
+    "+553199594121": "stress-test do dono: slot drift, injection, zerar-conversa, clínicas fake (21/05–31/05)",
+    "+5599999999999": "smoke/ping de teste",
+    "+5511999999999": "smoke test inicial"
+  }
+}

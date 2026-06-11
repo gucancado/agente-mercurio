@@ -29,7 +29,7 @@ const path = require('node:path');
 const { complete } = require('./llm-adapter');
 const { loadSkillsForIntent } = require('./skills-loader');
 
-const WORKSPACE = '/workspace';
+const WORKSPACE = process.env.WORKSPACE_DIR || '/workspace';
 const CLASSIFIER_SCHEMA = JSON.parse(
   fs.readFileSync(path.join(WORKSPACE, '_base/schemas/classifier.json'), 'utf8')
 );

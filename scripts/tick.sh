@@ -92,7 +92,7 @@ while IFS= read -r ITEM; do
   LOWER_TEXT=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   CHANNEL=$(jq -r '.channel' <<<"$ITEM")
   INSTANCE=$(jq -r '.instance' <<<"$ITEM")
-  if [[ "$LOWER_TEXT" == "zerar-conversa" || "$LOWER_TEXT" == "zerar conversa" || "$LOWER_TEXT" == "/reset" ]]; then
+  if [[ "$LOWER_TEXT" == "!zerar" || "$LOWER_TEXT" == "zerar-conversa" || "$LOWER_TEXT" == "zerar conversa" || "$LOWER_TEXT" == "/reset" ]]; then
     log "id=$ID comando zerar-conversa from=$IDENTIFIER"
     curl -fsS --max-time 10 -X POST \
       -H "X-Agent-Token: ${WORKER_TOKEN}" \

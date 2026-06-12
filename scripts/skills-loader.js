@@ -31,7 +31,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SKILLS_DIR = '/workspace/_base/skills';
+const SKILLS_DIR = path.join(process.env.WORKSPACE_DIR || '/workspace', '_base', 'skills');
 
 const TRANSVERSAIS = ['anti-padroes-tom', 'formato-saida', 'lgpd-ethics', 'whatsapp-tone'];
 
